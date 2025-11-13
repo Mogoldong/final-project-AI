@@ -1,0 +1,10 @@
+#python 3.12
+langchain
+langchain-openai
+langchain-community
+chromadb
+pydantic
+gradio       
+python-dotenv
+beautifulsoup4
+tiktoken
