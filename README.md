@@ -10,7 +10,8 @@
 
 3. 에이전트에 Tool 등록
 - Tool 함수 작성이 끝나면 ToolRegistry에 등록해야합니다. (파일 경로 src/agent/tool_registry.py)
-'''
+
+```
 from src.tools.(새로운 파일 이름) import (Tool 이름)
 
 def register_default_tools() -> ToolRegistry:
@@ -25,7 +26,7 @@ def register_default_tools() -> ToolRegistry:
     ))
     
     return reg
-'''
+```
 
 4. 독립 테스트
 - 툴을 만든 후 에이전트 등록 전 툴이 작동하는지 확인하고 싶다면 해당 파일 하단에 if __name__ == "__main__": 블록을 만들어 함수가 잘 동작하는지 먼저 테스트해보면 됩니다.
