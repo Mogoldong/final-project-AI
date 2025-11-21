@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import json
 
 from src.rag.retriever import search_recipe, RecipeSearchInput
+from src.tools.memory_tools import read_memory, write_memory, ReadMemoryInput, WriteMemoryInput
 
 class ToolSpec(BaseModel):
     name: str
@@ -53,6 +54,20 @@ def register_default_tools() -> ToolRegistry:
         description="사용자의 상황, 기분, 재료 등을 고려하여 적절한 레시피를 검색합니다.",
         input_model=RecipeSearchInput,
         handler=lambda input_data: {"results": search_recipe(input_data)}
+    ))
+
+    reg.register_tool(ToolSpec(
+        name="read_memory",
+        description="사용자의 취향, 과거 대화, 특정 지식 등 저장된 기억을 검색합니다.",
+        input_model=ReadMemoryInput,
+        handler=read_memory
+    ))
+
+    reg.register_tool(ToolSpec(
+        name="write_memory",
+        description="사용자에 대한 정보나 중요한 대화 내용을 장기 기억에 저장합니다.",
+        input_model=WriteMemoryInput,
+        handler=write_memory
     ))
 
     # 은기님 여기다가 툴 추가해주시면 됩니다
