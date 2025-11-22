@@ -1,3 +1,5 @@
+from tools.weather_tool import GetWeatherInput, get_current_weather
+from tools.recipe_tool import RecommendRecipeInput, recommend_recipe
 from typing import Any, Callable, Dict, List
 from pydantic import BaseModel
 import json
@@ -56,4 +58,19 @@ def register_default_tools() -> ToolRegistry:
     ))
 
     # 은기님 여기다가 툴 추가해주시면 됩니다
+    
+    reg.register_tool(ToolSpec(
+        name="get_weather",
+        description="현재 날씨 정보 조회",
+        input_model=GetWeatherInput,
+        handler=lambda args: get_current_weather(GetWeatherInput(**args)),
+    ))
+    
+    # 레시피 추천 도구
+    reg.register_tool(ToolSpec(
+        name="recommend_recipe",
+        description="기분과 날씨에 따른 레시피 추천",
+        input_model=RecommendRecipeInput,
+        handler=lambda args: recommend_recipe(RecommendRecipeInput(**args)),
+    ))
     return reg
