@@ -5,6 +5,7 @@ from openai import OpenAI
 from typing import Any, Dict, List
 
 from src.agent.tool_registry import ToolRegistry, register_default_tools
+from src.agent.memory_extractor import extract_and_save_memory
 
 load_dotenv()
 
@@ -54,9 +55,13 @@ class RealLLMAgent:
                 model=self.model,
                 messages=messages,
             )
-            return final_response.choices[0].message.content
-
-        return msg.content
+            final_answer = final_response.choices[0].message.content
+            extract_and_save_memory(user_text, final_answer)
+            return final_answer
+        final_answer = msg.content
+        extract_and_save_memory(user_text, final_answer)
+        
+        return final_answer
 
 def make_agent(model: str = "gpt-4o-mini") -> RealLLMAgent:
     reg = register_default_tools()
@@ -68,7 +73,7 @@ if __name__ == "__main__":
     agent = make_agent()
     
     # 시나리오 테스트
-    input_text = "오늘 명절이라 가족들이랑 먹을건데 소고기 들어간 국물 요리 추천해줘"
+    input_text = "나 요즘 다이어트 중이라 저녁은 샐러드만 먹고 있어. 추천해줘." # "오늘 명절이라 가족들이랑 먹을건데 소고기 들어간 국물 요리 추천해줘"
     response = agent.chat(input_text)
     
     print(f"답변: {response}")
