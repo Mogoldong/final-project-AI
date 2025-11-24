@@ -74,7 +74,6 @@ def get_current_weather(input: GetWeatherInput) -> Dict[str, Any]:
                 "wind_speed": None,
                 "sky_status": "맑음"
             }
-            
             # 카테고리별 데이터 추출
             for item in items:
                 category = item.get('category')
