@@ -8,7 +8,6 @@ class Ingredient(BaseModel):
 
 class Recipe(BaseModel):
     # 레시피 데이터 전체 스키마
-    
     recipe_id: str = Field(
         description="레시피 고유 ID (예: 'R_001')",
         examples=["R_001"]

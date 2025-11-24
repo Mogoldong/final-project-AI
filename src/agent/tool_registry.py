@@ -1,11 +1,14 @@
-from tools.weather_tool import GetWeatherInput, get_current_weather
-from tools.recipe_tool import RecommendRecipeInput, recommend_recipe
+
 from typing import Any, Callable, Dict, List
 from pydantic import BaseModel
 import json
 
 from src.rag.retriever import search_recipe, RecipeSearchInput
 from src.tools.memory_tools import read_memory, write_memory, ReadMemoryInput, WriteMemoryInput
+from src.tools.search_tool import search_google, SearchInput
+from src.tools.weather_tool import get_current_weather
+from src.tools.weather_tool import GetWeatherInput
+# from src.tools.recipe_tool import RecommendRecipeInput
 
 class ToolSpec(BaseModel):
     name: str
@@ -72,20 +75,27 @@ def register_default_tools() -> ToolRegistry:
         handler=write_memory
     ))
 
+    reg.register_tool(ToolSpec(
+        name="search_google",
+        description="Google 검색을 통해 최신 정보, 재료 시세, 대체 재료, 요리 팁 등을 찾아줍니다. RAG에 없는 정보를 찾을 때 유용합니다.",
+        input_model=SearchInput,
+        handler=search_google
+    ))
+
     # 은기님 여기다가 툴 추가해주시면 됩니다
     
     reg.register_tool(ToolSpec(
         name="get_weather",
         description="현재 날씨 정보 조회",
         input_model=GetWeatherInput,
-        handler=lambda args: get_current_weather(GetWeatherInput(**args)),
+        handler=get_current_weather,
     ))
     
-    # 레시피 추천 도구
-    reg.register_tool(ToolSpec(
-        name="recommend_recipe",
-        description="기분과 날씨에 따른 레시피 추천",
-        input_model=RecommendRecipeInput,
-        handler=lambda args: recommend_recipe(RecommendRecipeInput(**args)),
-    ))
+    # # 레시피 추천 도구
+    # reg.register_tool(ToolSpec(
+    #     name="recommend_recipe",
+    #     description="기분과 날씨에 따른 레시피 추천",
+    #     input_model=RecommendRecipeInput,
+    #     handler=lambda args: recommend_recipe(RecommendRecipeInput(**args)),
+    # ))
     return reg
