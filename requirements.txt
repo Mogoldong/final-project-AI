@@ -12,3 +12,4 @@ beautifulsoup4
 tiktoken
 requests
 sentence-transformers
+pypdf
