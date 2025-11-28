@@ -8,7 +8,9 @@ from src.tools.memory_tools import read_memory, write_memory, ReadMemoryInput, W
 from src.tools.search_tool import search_google, SearchInput
 from src.tools.weather_tool import get_current_weather
 from src.tools.weather_tool import GetWeatherInput
-# from src.tools.recipe_tool import RecommendRecipeInput
+from src.tools.time_tool import get_current_time, GetTimeInput
+from src.tools.calculator_tool import calculate, CalculatorInput
+from src.rag.pdf_retriever import search_food_knowledge, KnowledgeSearchInput
 
 class ToolSpec(BaseModel):
     name: str
@@ -89,6 +91,27 @@ def register_default_tools() -> ToolRegistry:
         description="현재 날씨 정보 조회",
         input_model=GetWeatherInput,
         handler=get_current_weather,
+    ))
+
+    reg.register_tool(ToolSpec(
+        name="get_current_time",
+        description="현재 날짜와 시간을 알려줍니다.",
+        input_model=GetTimeInput,
+        handler=get_current_time,
+    ))
+
+    reg.register_tool(ToolSpec(
+        name="calculate",
+        description="간단한 사칙연산(+, -, *, /)을 수행합니다. 예: '10 + 5'",
+        input_model=CalculatorInput,
+        handler=calculate,
+    ))
+
+    reg.register_tool(ToolSpec(
+        name="search_food_knowledge",
+        description="요리 재료의 효능, 영양 성분, 요리 용어 등 '지식'적인 내용이 궁금할 때 PDF 문서를 검색합니다.",
+        input_model=KnowledgeSearchInput,
+        handler=lambda input_data: {"results": search_food_knowledge(input_data)}
     ))
     
     # # 레시피 추천 도구
