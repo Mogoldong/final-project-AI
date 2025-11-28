@@ -1,6 +1,5 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
-# [변경 1] OpenAIEmbeddings 삭제 -> HuggingFaceEmbeddings 추가
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
