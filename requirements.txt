@@ -11,3 +11,4 @@ python-dotenv
 beautifulsoup4
 tiktoken
 requests
+sentence-transformers

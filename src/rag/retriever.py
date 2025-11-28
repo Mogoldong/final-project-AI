@@ -1,13 +1,17 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
-from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
+from langchain_huggingface import HuggingFaceEmbeddings
 
 load_dotenv()
 
 CHROMA_PATH = "data/chromaDB/" 
-embeddings = OpenAIEmbeddings()
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': True}
+)
 
 try:
     vector_db = Chroma(

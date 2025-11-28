@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
-from langchain_openai import OpenAIEmbeddings
+# [변경 1] OpenAIEmbeddings 삭제 -> HuggingFaceEmbeddings 추가
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
 
@@ -8,9 +9,15 @@ load_dotenv()
 
 CHROMA_PATH = "data/chroma_db/"
 COLLECTION_NAME = "food_knowledge"
-embeddings = OpenAIEmbeddings()
+
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': True}
+)
 
 try:
+    print(f"[Knowledge Retriever] '{COLLECTION_NAME}' 컬렉션 로드 중...")
     vector_db = Chroma(
         persist_directory=CHROMA_PATH,
         embedding_function=embeddings,
@@ -39,4 +46,4 @@ def search_food_knowledge(input: KnowledgeSearchInput) -> List[Dict[str, Any]]:
     return [{"content": doc.page_content, "source": doc.metadata.get("source")} for doc in docs]
 
 if __name__ == "__main__":
-    print(search_food_knowledge(KnowledgeSearchInput(query="다이어트에 좋은 음식")))
+    print(search_food_knowledge(KnowledgeSearchInput(query="키토제닉 다이어트가 뭐야?")))

@@ -1,22 +1,26 @@
 import os
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+# [변경 1] OpenAIEmbeddings 삭제 -> HuggingFaceEmbeddings 추가
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DATA_PATH = "data/knowledge/"
-
 CHROMA_PATH = "data/chroma_db/"
-
 COLLECTION_NAME = "food_knowledge"
+
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': True}
+)
 
 def build_pdf_db():
     print(f"'{DATA_PATH}' 폴더에서 지식용 PDF 문서를 스캔")
 
-    # 1. PDF 로드
     if not os.path.exists(DATA_PATH):
         os.makedirs(DATA_PATH)
         print(f"'{DATA_PATH}' 폴더가 없어 생성했습니다. PDF 파일을 넣어주세요.")
@@ -42,13 +46,13 @@ def build_pdf_db():
     
     Chroma.from_documents(
         documents=chunks,
-        embedding=OpenAIEmbeddings(),
+        embedding=embeddings,
         persist_directory=CHROMA_PATH,
         collection_name=COLLECTION_NAME
     )
     
     print("="*40)
-    print(f"DB (PDF) 구축 완료!")
+    print(f"지식 DB (PDF) 구축 완료!")
     print("="*40)
 
 if __name__ == "__main__":

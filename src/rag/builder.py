@@ -1,19 +1,22 @@
 import json
+import os
 from pydantic import ValidationError
 from typing import List
 
 from src.rag.schema import Recipe 
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
 
 load_dotenv()
 
 RECIPE_DATA_PATH = "data/raw/recipes.json"
-
 CHROMA_PATH = "data/chromaDB/" 
-
-embeddings = OpenAIEmbeddings()
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': True}
+)
 
 def load_recipes() -> List[Recipe]:
     print(f"'{RECIPE_DATA_PATH}'에서 레시피 원본 JSON 파일 로드")
@@ -70,7 +73,6 @@ def build_vector_db():
     )
     
     print("="*30)
-    print("ChromaDB 구축 완료")
     print(f"저장 경로: {CHROMA_PATH}")
     print(f"총 {len(documents)}개의 레시피 색인")
     print("="*30)
