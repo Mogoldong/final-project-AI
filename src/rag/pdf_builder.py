@@ -1,7 +1,6 @@
 import os
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-# [변경 1] OpenAIEmbeddings 삭제 -> HuggingFaceEmbeddings 추가
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
