@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 import sys
 
 import gradio as gr
@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from src.agent.bot import RealLLMAgent, make_agent
+from src.agent.bot import make_agent
 
 ChatHistory = List[Tuple[str, str]]
 
@@ -19,14 +19,14 @@ INTRO_MD = """
 """
 
 
-def _ensure_agent(agent_state: Optional[RealLLMAgent]) -> RealLLMAgent:
+def _ensure_agent(agent_state: Any) -> Any:
     """세션마다 하나의 에이전트를 유지한다."""
     return agent_state or make_agent()
 
 
 def handle_message(
-    user_message: str, history: ChatHistory, agent_state: Optional[RealLLMAgent]
-) -> Tuple[ChatHistory, RealLLMAgent, str]:
+    user_message: str, history: ChatHistory, agent_state: Optional[Any]
+) -> Tuple[ChatHistory, Any, str]:
     """사용자 입력을 받아 LLM 에이전트와 대화한다."""
     if not user_message or not user_message.strip():
         raise gr.Error("메시지를 입력해주세요.")
@@ -43,7 +43,7 @@ def handle_message(
     return updated_history, agent, ""
 
 
-def reset_conversation() -> Tuple[ChatHistory, Optional[RealLLMAgent], str]:
+def reset_conversation() -> Tuple[ChatHistory, None, str]:
     """대화와 에이전트를 초기화한다."""
     return [], None, ""
 
