@@ -20,8 +20,7 @@ try:
     )
 
     retriever = vector_db.as_retriever(search_kwargs={"k": 3})
-
-    print(f"총 {vector_db._collection.count()}개 문서 색인")
+    print(f"Total {vector_db._collection.count()} documents indexed")
 
 except Exception as e:
     print(e)
@@ -33,9 +32,9 @@ class RecipeSearchInput(BaseModel):
 
 def search_recipe(input: RecipeSearchInput) -> List[Dict[str, Any]]:
     if retriever is None:
-        return [{"error": "RAG Retriever가 로드되지 않았습니다."}]
+        return [{"error": "RAG Retriever not loaded"}]
         
-    print(f"쿼리: {input.query}")
+    print(f"[Tool] search_recipe: {input.query}")
     
     results_docs = retriever.invoke(input.query)
     

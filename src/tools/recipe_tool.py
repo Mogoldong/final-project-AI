@@ -1,6 +1,9 @@
 """
 기분 + 날씨 기반 레시피 추천
 """
+"""
+기분 + 날씨 기반 레시피 추천
+"""
 from typing import Any, Dict
 from pydantic import BaseModel, Field
 
@@ -12,15 +15,7 @@ class RecommendRecipeInput(BaseModel):
 
 
 def recommend_recipe(input: RecommendRecipeInput) -> Dict[str, Any]:
-    """
-    기분과 날씨에 따라 레시피 추천
-    
-    Args:
-        input: 기분 + 날씨 정보
-    
-    Returns:
-        추천 레시피
-    """
+    print(f"[Tool] recommend_recipe: mood={input.mood}")
     mood = input.mood.lower()
     weather = input.weather
     
@@ -142,27 +137,3 @@ def recommend_recipe(input: RecommendRecipeInput) -> Dict[str, Any]:
         "recipe": recipe,
         "reasoning": f"{weather_category} + {matched_mood} → {recipe['name']}"
     }
-
-
-# 독립 테스트
-if __name__ == "__main__":
-    # Mock 날씨 데이터
-    mock_weather = {
-        "location": "서울",
-        "temperature": "15°C",
-        "humidity": "60%",
-        "precipitation": "없음",
-        "sky_status": "맑음"
-    }
-    
-    test_input = RecommendRecipeInput(
-        mood="우울",
-        weather=mock_weather
-    )
-    
-    result = recommend_recipe(test_input)
-    print(f"\n🍳 추천: {result['recipe']['name']}")
-    print(f"📝 설명: {result['recipe']['description']}")
-    print(f"🥘 재료: {', '.join(result['recipe']['ingredients'])}")
-    print(f"⏰ 시간: {result['recipe']['time']}")
-    print(f"💡 Reasoning: {result['reasoning']}")

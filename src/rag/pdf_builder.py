@@ -29,7 +29,7 @@ def build_pdf_db():
     documents = loader.load()
     
     if not documents:
-        print("경고: PDF 파일을 찾을 수 없습니다.")
+        print("Warning: No PDF files found")
         return
 
     print(f"총 {len(documents)}페이지를 로드")
@@ -51,8 +51,5 @@ def build_pdf_db():
     )
     
     print("="*40)
-    print(f"지식 DB (PDF) 구축 완료!")
+    print("지식 DB (PDF) 구축 완료!")
     print("="*40)
-
-if __name__ == "__main__":
-    build_pdf_db()

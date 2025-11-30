@@ -79,16 +79,14 @@ def register_default_tools() -> ToolRegistry:
 
     reg.register_tool(ToolSpec(
         name="search_google",
-        description="Google 검색을 통해 최신 정보, 재료 시세, 대체 재료, 요리 팁 등을 찾아줍니다. RAG에 없는 정보를 찾을 때 유용합니다.",
+        description="Google 검색을 통해 최신 정보, 재료 시세, 대체 재료, 요리 팁 등을 찾아줍니다.",
         input_model=SearchInput,
         handler=search_google
     ))
-
-    # 은기님 여기다가 툴 추가해주시면 됩니다
     
     reg.register_tool(ToolSpec(
         name="get_weather",
-        description="현재 날씨 정보 조회",
+        description="현재 날씨 정보를 조회합니다.",
         input_model=GetWeatherInput,
         handler=get_current_weather,
     ))
@@ -114,11 +112,4 @@ def register_default_tools() -> ToolRegistry:
         handler=lambda input_data: {"results": search_food_knowledge(input_data)}
     ))
     
-    # # 레시피 추천 도구
-    # reg.register_tool(ToolSpec(
-    #     name="recommend_recipe",
-    #     description="기분과 날씨에 따른 레시피 추천",
-    #     input_model=RecommendRecipeInput,
-    #     handler=lambda args: recommend_recipe(RecommendRecipeInput(**args)),
-    # ))
     return reg

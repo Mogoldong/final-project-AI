@@ -20,14 +20,12 @@ INTRO_MD = """
 
 
 def _ensure_agent(agent_state: Any) -> Any:
-    """세션마다 하나의 에이전트를 유지한다."""
     return agent_state or make_agent()
 
 
 def handle_message(
     user_message: str, history: ChatHistory, agent_state: Optional[Any]
 ) -> Tuple[ChatHistory, Any, str]:
-    """사용자 입력을 받아 LLM 에이전트와 대화한다."""
     if not user_message or not user_message.strip():
         raise gr.Error("메시지를 입력해주세요.")
 
@@ -36,7 +34,7 @@ def handle_message(
 
     try:
         answer = agent.chat(user_message.strip())
-    except Exception as exc:  # pragma: no cover - 오류 슬롯
+    except Exception as exc:
         raise gr.Error(f"응답 생성 중 문제가 발생했습니다: {exc}") from exc
 
     updated_history = history + [(user_message, answer)]
@@ -44,12 +42,10 @@ def handle_message(
 
 
 def reset_conversation() -> Tuple[ChatHistory, None, str]:
-    """대화와 에이전트를 초기화한다."""
     return [], None, ""
 
 
 def build_interface() -> gr.Blocks:
-    """대화형 Gradio Blocks UI를 구성한다."""
     with gr.Blocks(title="셰프봇 대화형 레시피 추천") as demo:
         gr.Markdown(INTRO_MD)
 

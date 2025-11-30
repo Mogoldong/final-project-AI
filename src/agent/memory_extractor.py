@@ -16,22 +16,21 @@ class MemoryExtractionResult(BaseModel):
     tags: Optional[List[str]] = Field(description="관련 태그")
 
 EXTRACTOR_SYSTEM_PROMPT = """
-You are a memory extraction assistant.
-Your task:
-Read the given conversation between a user and an assistant.
-Decide whether there is any information that should be stored as long-term memory.
+당신은 메모리 추출 어시스턴트입니다.
+역할:
+사용자와 어시스턴트 간의 대화를 읽고, 장기 기억에 저장할 정보가 있는지 판단하세요.
 
-Long-term memories include:
-- User's stable preferences (e.g., likes spicy food, has peanut allergy).
-- Long-term projects or goals (e.g., on a diet).
-- Important facts that will likely be useful in future conversations.
+장기 기억에 저장해야 할 정보:
+- 사용자의 안정적인 선호도 (예: 매운 음식을 좋아함, 땅콩 알레르기 있음)
+- 장기 프로젝트 또는 목표 (예: 다이어트 중)
+- 향후 대화에서 유용할 만한 중요한 사실
 
-Do NOT store:
-- Short-lived or trivial facts (e.g., "hello", "thank you").
-- Very detailed logs that are unlikely to be reused.
+저장하지 말아야 할 정보:
+- 일시적이거나 사소한 사실 (예: "안녕", "감사합니다")
+- 재사용될 가능성이 낮은 상세한 로그
 
-Output:
-Return a JSON object matching the MemoryExtractionResult schema.
+출력:
+MemoryExtractionResult 스키마와 일치하는 JSON 객체를 반환하세요.
 """
 
 def extract_and_save_memory(user_input: str, final_answer: str):
@@ -39,7 +38,7 @@ def extract_and_save_memory(user_input: str, final_answer: str):
     
     conversation_snippet = f"User: {user_input}\nAssistant: {final_answer}"
     
-    print("\n🧠 [Memory Extractor] 대화 분석 중...")
+    print("[Memory] Analyzing conversation...")
 
     try:
         completion = client.beta.chat.completions.parse(
@@ -54,7 +53,7 @@ def extract_and_save_memory(user_input: str, final_answer: str):
         result = completion.choices[0].message.parsed
         
         if result.should_write_memory:
-            print(f"내용: {result.content}")
+            print(f"Content: {result.content}")
             
             write_input = WriteMemoryInput(
                 content=result.content,
@@ -67,13 +66,7 @@ def extract_and_save_memory(user_input: str, final_answer: str):
             print(f"  -> {save_result}")
             
         else:
-            print("저장할 중요 정보 없음.")
+            print("No important information to save")
             
     except Exception as e:
-        print(f"오류: {e}")
-
-if __name__ == "__main__":
-    extract_and_save_memory(
-        user_input="나 요즘 다이어트 중이라 저녁은 샐러드만 먹고 있어.",
-        final_answer="네, 알겠습니다. 저칼로리 샐러드 레시피를 찾아드릴게요."
-    )
+        print(f"Error: {e}")

@@ -49,6 +49,11 @@ class Recipe(BaseModel):
         description="요리 난이도",
         examples=["중"]
     )
+    
+    views: int = Field(
+        description="조회수",
+        examples=[2943433]
+    )
 
 class RecipeDatabase(BaseModel):
     recipes: List[Recipe]

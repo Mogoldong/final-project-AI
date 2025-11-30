@@ -24,13 +24,13 @@ def load_recipes() -> List[Recipe]:
         with open(RECIPE_DATA_PATH, 'r', encoding='utf-8') as f:
             data = json.load(f)
             recipes = [Recipe(**recipe) for recipe in data]
-            print(f"✅ 성공: {len(recipes)}개의 레시피 로드 및 검증")
+            print(f"Success: {len(recipes)}개의 레시피 로드 및 검증")
             return recipes
     except FileNotFoundError:
-        print(f"오류: '{RECIPE_DATA_PATH}' 파일을 찾을 수 없습니다.")
+        print(f"Error: '{RECIPE_DATA_PATH}' 파일을 찾을 수 없습니다.")
         return []
     except ValidationError as e:
-        print(f"오류: JSON 데이터가 'Recipe' 스키마와 일치하지 않습니다.\n{e}")
+        print(f"Error: JSON 데이터가 'Recipe' 스키마와 일치하지 않습니다.\n{e}")
         return []
 
 def format_recipe_to_text(recipe: Recipe) -> str:
@@ -56,7 +56,7 @@ def format_recipe_to_text(recipe: Recipe) -> str:
 def build_vector_db():
     recipes = load_recipes()
     if not recipes:
-        print("레시피가 없음")
+        print("No recipes found")
         return
 
     documents = [format_recipe_to_text(recipe) for recipe in recipes]
@@ -76,6 +76,3 @@ def build_vector_db():
     print(f"저장 경로: {CHROMA_PATH}")
     print(f"총 {len(documents)}개의 레시피 색인")
     print("="*30)
-
-if __name__ == "__main__":
-    build_vector_db()
