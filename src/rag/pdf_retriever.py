@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CHROMA_PATH = "data/chroma_db/"
+CHROMA_PATH = "data/chromaDB/"
 COLLECTION_NAME = "food_knowledge"
 
 embeddings = HuggingFaceEmbeddings(
