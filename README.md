@@ -18,13 +18,17 @@ graph TD
     CheckInt --> Decision2{should_loop<br/>판단}
     
     Decision2 -->|google_search_count < 4| Agent
-    Decision2 -->|google_search_count >= 4<br/>인터럽트 발생| End
+    Decision2 -->|google_search_count >= 4<br/>인터럽트 발생| WaitUser{사용자 응답 확인}
+    
+    WaitUser -->|네/계속/yes 등| Agent
+    WaitUser -->|다른 답변| End
     
     style Agent fill:#e1f5ff,stroke:#01579b,stroke-width:2px,color:#000
     style Tools fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#000
     style CheckInt fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
     style Decision1 fill:#fff9c4,stroke:#f57f17,stroke-width:2px,color:#000
     style Decision2 fill:#fff9c4,stroke:#f57f17,stroke-width:2px,color:#000
+    style WaitUser fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
     style Start fill:#c8e6c9,stroke:#1b5e20,stroke-width:2px,color:#000
     style End fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px,color:#000
 ```
@@ -46,11 +50,14 @@ graph TD
 
 ### 3. Check Interrupt 노드 (check_interrupt)
 - Google 검색 횟수가 4회 이상이면 경고 메시지 발생
-- 사용자의 계속 진행 여부 확인
+- 사용자에게 계속 진행 여부를 물어봄
 
 ### 4. 분기 로직
 - **should_continue**: tool_calls 여부에 따라 Tools 노드 또는 종료
-- **should_loop**: 인터럽트 발생 여부에 따라 Agent 재실행 또는 종료
+- **should_loop**: 
+  - 검색 4회 미만: Agent로 루프
+  - 검색 4회 이상 & 사용자 "네/계속/yes": Agent로 루프 (계속 진행)
+  - 검색 4회 이상 & 사용자 다른 답변: 종료
 
 ## 상태 관리
 
