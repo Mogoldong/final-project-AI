@@ -1,6 +1,6 @@
 import os
 import json
-from typing import TypedDict, Annotated, List, Literal
+from typing import TypedDict, Annotated, List, Literal, Generator, Dict, Any
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
@@ -16,12 +16,13 @@ load_dotenv()
 
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
+    google_search_count: int
 
 class LangGraphAgent:
     def __init__(self, model: str = "gpt-4o-mini"):
         self.registry = register_default_tools()
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.llm = ChatOpenAI(model=model, api_key=self.api_key, temperature=0)
+        self.llm = ChatOpenAI(model=model, api_key=self.api_key, temperature=0, streaming=True)
         self.tools_schema = self.registry.list_openai_tools()
         self.llm_with_tools = self.llm.bind_tools(self.tools_schema)
 
@@ -30,6 +31,10 @@ class LangGraphAgent:
         - 사용자의 취향이나 알레르기 정보를 기억(read_memory)하고 활용하세요.
         - RAG(레시피/지식 검색)에 정보가 없거나, 재료 대체법 등 모르는 내용이 있으면 '구글 검색' 툴을 적극적으로 사용하세요.
         - 항상 친절하고 구체적으로 답변하세요.
+
+        ** 중요: Google 검색 횟수가 3회를 초과하면, 시스템이 경고 메시지를 보냅니다. 
+        이때 사용자가 '네', '계속', 'yes' 등으로 답변하면 검색을 계속 진행하고,
+        그 외의 답변이면 검색 없이 현재 정보로만 답변하세요.
         """
         
         self.graph = self._build_graph()
@@ -67,20 +72,36 @@ class LangGraphAgent:
                 content=content
             ))
             
-        return {"messages": results}
+        google_search_count = state.get("google_search_count", 0)
+        search_count_in_turn = sum(1 for msg in results if msg.name == 'search_google')
+        
+        return {"messages": results, "google_search_count": google_search_count + search_count_in_turn}
 
     def should_continue(self, state: AgentState) -> Literal["tools", END]:
         last_message = state["messages"][-1]
+
+        if isinstance(last_message, SystemMessage) and "인터럽트 발생" in last_message.content:
+            return END
         
         if last_message.tool_calls:
             return "tools"
         return END
+
+    def should_loop(self, state: AgentState) -> Literal["loop", END]:
+        last_message = state["messages"][-1]
+        
+        if isinstance(last_message, SystemMessage) and "인터럽트 발생" in last_message.content:
+            return END
+        
+        return "loop"
 
     def _build_graph(self):
         workflow = StateGraph(AgentState)
 
         workflow.add_node("agent", self.call_model)
         workflow.add_node("tools", self.run_tools)
+        workflow.add_node("check_interrupt", self.check_interrupt)
+
         workflow.set_entry_point("agent")
         workflow.add_conditional_edges(
             "agent",
@@ -88,17 +109,27 @@ class LangGraphAgent:
             {"tools": "tools", END: END}
         )
         
-        workflow.add_edge("tools", "agent")
+        workflow.add_edge("tools", "check_interrupt")
+
+        workflow.add_conditional_edges(
+            "check_interrupt",
+            self.should_loop,
+            {
+                "loop": "agent",
+                END: END,
+            }
+        )
 
         memory = MemorySaver()
         
         return workflow.compile(checkpointer=memory)
 
     def chat(self, user_text: str, thread_id: str = "default_thread") -> str:
+        """비-스트리밍 버전 (기존 호환성 유지)"""
         config = {"configurable": {"thread_id": thread_id}}
         
         events = self.graph.stream(
-            {"messages": [HumanMessage(content=user_text)]}, 
+            {"messages": [HumanMessage(content=user_text)]},
             config, 
             stream_mode="values"
         )
@@ -109,109 +140,112 @@ class LangGraphAgent:
                 last_msg = event["messages"][-1]
                 if isinstance(last_msg, AIMessage) and not last_msg.tool_calls:
                     final_response = last_msg.content
+                elif isinstance(last_msg, SystemMessage) and "인터럽트 발생" in last_msg.content:
+                    final_response = last_msg.content
         
         extract_and_save_memory(user_text, final_response)
         
         return final_response
+    
+    def chat_stream(self, user_text: str, thread_id: str = "default_thread") -> Generator[Dict[str, Any], None, None]:
+        """
+        스트리밍 버전 - 각 노드의 실행 결과를 실시간으로 반환
+        
+        Returns:
+            Generator yielding dictionaries with:
+            - node: 노드 이름
+            - type: 메시지 타입 (ai_message, tool_call, system_message 등)
+            - content: 메시지 내용
+        """
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        final_response = ""
+        
+        # stream_mode="updates"로 각 노드의 업데이트를 받음
+        for event in self.graph.stream(
+            {"messages": [HumanMessage(content=user_text)]},
+            config,
+            stream_mode="updates"
+        ):
+            # event는 {node_name: update_value} 형태의 딕셔너리
+            for node_name, update_value in event.items():
+                
+                # messages가 업데이트된 경우
+                if "messages" in update_value:
+                    messages = update_value["messages"]
+                    
+                    for msg in messages:
+                        # AIMessage 처리
+                        if isinstance(msg, AIMessage):
+                            if msg.tool_calls:
+                                # 도구 호출
+                                for tool_call in msg.tool_calls:
+                                    yield {
+                                        "node": node_name,
+                                        "type": "tool_call",
+                                        "tool_name": tool_call["name"],
+                                        "tool_args": tool_call["args"]
+                                    }
+                            elif msg.content:
+                                # 일반 AI 응답
+                                yield {
+                                    "node": node_name,
+                                    "type": "ai_message",
+                                    "content": msg.content
+                                }
+                                final_response = msg.content
+                        
+                        # ToolMessage 처리
+                        elif isinstance(msg, ToolMessage):
+                            try:
+                                tool_result = json.loads(msg.content)
+                            except:
+                                tool_result = msg.content
+                            
+                            yield {
+                                "node": node_name,
+                                "type": "tool_result",
+                                "tool_name": msg.name,
+                                "result": tool_result
+                            }
+                        
+                        # SystemMessage 처리 (인터럽트 메시지)
+                        elif isinstance(msg, SystemMessage):
+                            if "인터럽트 발생" in msg.content or "알림" in msg.content:
+                                yield {
+                                    "node": node_name,
+                                    "type": "system_message",
+                                    "content": msg.content
+                                }
+                                final_response = msg.content
+                
+                # google_search_count 업데이트
+                if "google_search_count" in update_value:
+                    yield {
+                        "node": node_name,
+                        "type": "search_count",
+                        "count": update_value["google_search_count"]
+                    }
+        
+        # 메모리 저장
+        if final_response:
+            extract_and_save_memory(user_text, final_response)
+    
+    def check_interrupt(self, state: AgentState):
+        current_count = state.get("google_search_count", 0)
+        
+        if current_count >= 4:
+            interrupt_message = SystemMessage(
+                content=f"🚨 [알림] Google 검색 툴을 권장 한도(3회)를 초과하여 사용했습니다. "
+                    f"하루 API 호출 한도는 100회입니다. (현재 {current_count}회 사용)\n\n"
+                    f"그래도 계속 검색을 진행하시겠습니까? "
+                    f"계속하려면 '네' 또는 '계속'이라고 입력해주세요. "
+                    f"중단하려면 다른 질문을 해주세요."
+            )
+            return {"messages": [interrupt_message]}
+    
+        return {"messages": []}
 
 
 def make_agent(model: str = "gpt-4o-mini") -> LangGraphAgent:
     return LangGraphAgent(model=model)
-
-
-def visualize_graph_structure():
-    """LangGraph 구조를 시각화합니다."""
-    
-    print("\n" + "=" * 80)
-    print("LangGraph Agent 구조")
-    print("=" * 80)
-    print("""
-    ┌────────────────────────────────────────────────────────────────────┐
-    │                        사용자 입력 (User)                           │
-    └──────────────────────────────┬──────────────────────────────────────┘
-                                   │
-                                   ▼
-                    ╔═════════════════════════════╗
-                    │      agent 노드             │
-                    │    (call_model)             │
-                    │                             │
-                    │  1. SystemMessage 추가      │
-                    │  2. LLM 호출                │
-                    │  3. 도구 필요 여부 판단     │
-                    ╚──────────┬──────────────────╝
-                               │
-                ┌──────────────┼──────────────┐
-                │              │              │
-                ▼              ▼              ▼
-           도구 필요        직접 응답       (상태 분기)
-                │              │              │
-                │              │              │
-        ╔═══════════════╗      │     ✓ tool_calls 존재
-        │  tools 노드   │      │              │
-        │ (run_tools)   │      ▼              ▼
-        │               │   [END]          "tools"
-        │ 1. 도구 실행  │ (최종 응답)         │
-        │ 2. 결과 수집  │                    │
-        │ 3. Message 반환│                   │
-        ╚────────┬──────╝                    │
-                 │                          │
-                 └──────────┬───────────────┘
-                            │
-                            ▼
-                    agent 노드로 돌아감
-                    (다시 LLM 호출)
-                            │
-                    (반복: 도구가 필요 없을 때까지)
-
-    State 구조 (메시지 기반 Reducer):
-    ┌──────────────────────────────────────────────────────┐
-    │ AgentState                                           │
-    ├──────────────────────────────────────────────────────┤
-    │ messages: Annotated[List[BaseMessage],               │
-    │           add_messages]                              │
-    │                                                       │
-    │ ✓ add_messages reducer:                              │
-    │   - 새 메시지를 자동으로 누적                          │
-    │   - 중복 제거 및 최적화 수행                          │
-    │   - BaseMessage 타입 지원                             │
-    │     ├── HumanMessage (사용자)                         │
-    │     ├── AIMessage (LLM)                              │
-    │     ├── ToolMessage (도구 결과)                       │
-    │     └── SystemMessage (시스템)                        │
-    └──────────────────────────────────────────────────────┘
-
-    데이터 흐름:
-    ┌─────────────────────────────────────────────────────┐
-    │ Turn 1: "버터 대체재료가 뭐야?"                      │
-    ├─────────────────────────────────────────────────────┤
-    │ 1. HumanMessage: "버터 대체재료가 뭐야?"             │
-    │ 2. agent → LLM 호출 → search_google 필요 판단       │
-    │ 3. AIMessage: {tool_calls: [search_google]}         │
-    │ 4. tools → search_google 실행                        │
-    │ 5. ToolMessage: {"olive_oil": "...", ...}           │
-    │ 6. agent → LLM 호출 (도구 결과 포함)                │
-    │ 7. AIMessage: "버터를 대체할 수 있는 재료는..."     │
-    │    (tool_calls 없음 → END)                          │
-    └─────────────────────────────────────────────────────┘
-
-    Turn 2: "그럼 계란은?"
-    ├─────────────────────────────────────────────────────┤
-    │ - 이전 모든 메시지 유지 (add_messages reducer)      │
-    │ - 새 HumanMessage 추가                               │
-    │ - 컨텍스트 유지된 상태로 진행                        │
-    └─────────────────────────────────────────────────────┘
-
-    메모리 관리:
-    ┌─────────────────────────────────────────────────────┐
-    │ MemorySaver (Checkpointer)                          │
-    ├─────────────────────────────────────────────────────┤
-    │ - thread_id별로 대화 이력 저장                       │
-    │ - 여러 사용자/세션 동시 지원                         │
-    │ - 그래프 상태 persistence                           │
-    └─────────────────────────────────────────────────────┘
-    """)
-    print("=" * 80 + "\n")
-
-
-if __name__ == "__main__":
-    visualize_graph_structure()

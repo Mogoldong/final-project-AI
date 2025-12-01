@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Tuple, Any
+from typing import List, Optional, Tuple, Any, Generator
 import sys
 
 import gradio as gr
@@ -19,28 +19,67 @@ INTRO_MD = """
 """
 
 
+# 에이전트 객체 확인 및 생성
 def _ensure_agent(agent_state: Any) -> Any:
     return agent_state or make_agent()
 
 
-def handle_message(
+# 스트리밍 메시지 처리 함수
+def handle_message_stream(
     user_message: str, history: ChatHistory, agent_state: Optional[Any]
-) -> Tuple[ChatHistory, Any, str]:
+) -> Generator[Tuple[ChatHistory, Any, str], None, None]:
+    """스트리밍으로 응답을 실시간으로 보여주는 함수"""
     if not user_message or not user_message.strip():
         raise gr.Error("메시지를 입력해주세요.")
 
     history = history or []
     agent = _ensure_agent(agent_state)
 
+    # 사용자 메시지 추가
+    history = history + [(user_message, "")]
+    
     try:
-        answer = agent.chat(user_message.strip())
+        accumulated_response = ""
+        tool_info = ""
+        
+        for chunk in agent.chat_stream(user_message.strip()):
+            
+            # AI 메시지 스트리밍
+            if chunk["type"] == "ai_message":
+                accumulated_response = chunk["content"]
+                updated_history = history[:-1] + [(user_message, accumulated_response)]
+                yield updated_history, agent, ""
+            
+            # 도구 호출 표시
+            elif chunk["type"] == "tool_call":
+                tool_name = chunk["tool_name"]
+                tool_info = f"\n\n🔧 [{tool_name} 실행 중...]"
+                updated_history = history[:-1] + [(user_message, accumulated_response + tool_info)]
+                yield updated_history, agent, ""
+            
+            # elif chunk["type"] == "tool_result":
+            #     tool_name = chunk["tool_name"]
+            #     tool_info = f"\n\n[{tool_name} 완료]"
+            #     updated_history = history[:-1] + [(user_message, accumulated_response + tool_info)]
+            #     yield updated_history, agent, ""
+            
+            # 시스템 메시지 (인터럽트)
+            elif chunk["type"] == "system_message":
+                accumulated_response = chunk["content"]
+                updated_history = history[:-1] + [(user_message, accumulated_response)]
+                yield updated_history, agent, ""
+        
+        # 최종 응답
+        final_history = history[:-1] + [(user_message, accumulated_response)]
+        yield final_history, agent, ""
+        
     except Exception as exc:
-        raise gr.Error(f"응답 생성 중 문제가 발생했습니다: {exc}") from exc
+        error_msg = f"❌ 응답 생성 중 문제가 발생했습니다: {exc}"
+        error_history = history[:-1] + [(user_message, error_msg)]
+        yield error_history, agent, ""
 
-    updated_history = history + [(user_message, answer)]
-    return updated_history, agent, ""
 
-
+# 대화 초기화 함수
 def reset_conversation() -> Tuple[ChatHistory, None, str]:
     return [], None, ""
 
@@ -66,12 +105,12 @@ def build_interface() -> gr.Blocks:
             reset_btn = gr.Button("대화 초기화")
 
         send_btn.click(
-            fn=handle_message,
+            fn=handle_message_stream,
             inputs=[user_input, chatbot, agent_state],
             outputs=[chatbot, agent_state, user_input],
         )
         user_input.submit(
-            fn=handle_message,
+            fn=handle_message_stream,
             inputs=[user_input, chatbot, agent_state],
             outputs=[chatbot, agent_state, user_input],
         )
