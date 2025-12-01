@@ -8,6 +8,7 @@ from src.tools.memory_tools import write_memory, WriteMemoryInput
 
 load_dotenv()
 
+# 메모리 추출 결과 스키마 (이러한 형태로 저장됨)
 class MemoryExtractionResult(BaseModel):
     should_write_memory: bool = Field(description="메모리에 저장할 가치가 있는지 여부")
     memory_type: Optional[Literal["profile", "episodic", "knowledge"]] = Field(description="메모리 타입")
@@ -33,19 +34,20 @@ EXTRACTOR_SYSTEM_PROMPT = """
 MemoryExtractionResult 스키마와 일치하는 JSON 객체를 반환하세요.
 """
 
+
 def extract_and_save_memory(user_input: str, final_answer: str):
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
+    # 사용자 입력과 최종 답변을 기반으로 메모리 추출
     conversation_snippet = f"User: {user_input}\nAssistant: {final_answer}"
     
-    print("[Memory] Analyzing conversation...")
 
     try:
         completion = client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": EXTRACTOR_SYSTEM_PROMPT},
-                {"role": "user", "content": f"[CONVERSATION]\n{conversation_snippet}"}
+                {"role": "user", "content": f"[CONVERSATION]\n{conversation_snippet}"} # 사용자와 LLM 간 대화를 모두 보고 메모리를 추출
             ],
             response_format=MemoryExtractionResult,
         )
@@ -62,8 +64,7 @@ def extract_and_save_memory(user_input: str, final_answer: str):
                 tags=result.tags
             )
             
-            save_result = write_memory(write_input)
-            print(f"  -> {save_result}")
+            save_result = write_memory(write_input) # 메모리 저장 도구를 호출
             
         else:
             print("No important information to save")
