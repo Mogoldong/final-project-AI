@@ -28,7 +28,7 @@ def _ensure_agent(agent_state: Any) -> Any:
 def handle_message_stream(
     user_message: str, history: ChatHistory, agent_state: Optional[Any]
 ) -> Generator[Tuple[ChatHistory, Any, str], None, None]:
-    """스트리밍으로 응답을 실시간으로 보여주는 함수"""
+    
     if not user_message or not user_message.strip():
         raise gr.Error("메시지를 입력해주세요.")
 
@@ -42,16 +42,16 @@ def handle_message_stream(
         accumulated_response = ""
         tool_info = ""
         
-        for chunk in agent.chat_stream(user_message.strip()):
+        for chunk in agent.chat_stream(user_message.strip()): # agent의 chat_stream에서 넘어오는 청크의 타입을 분석
             
             # AI 메시지 스트리밍
-            if chunk["type"] == "ai_message":
+            if chunk["type"] == "ai_message": # 에이전트의 메세지로 accumulated_response에 누적되며 실시간으로 출력된다. 
                 accumulated_response = chunk["content"]
                 updated_history = history[:-1] + [(user_message, accumulated_response)]
                 yield updated_history, agent, ""
             
             # 도구 호출 표시
-            elif chunk["type"] == "tool_call":
+            elif chunk["type"] == "tool_call": # 에이전트가 외부 도구를 호출했음을 알리며 내부 활동을 사용자에게 알린다. 
                 tool_name = chunk["tool_name"]
                 tool_info = f"\n\n🔧 [{tool_name} 실행 중...]"
                 updated_history = history[:-1] + [(user_message, accumulated_response + tool_info)]
@@ -64,10 +64,12 @@ def handle_message_stream(
             #     yield updated_history, agent, ""
             
             # 시스템 메시지 (인터럽트)
-            elif chunk["type"] == "system_message":
+            elif chunk["type"] == "system_message": # Google 검색 한도 초과와 같은 Interrupt 또는 시스템 메세지를 처리한다. 
                 accumulated_response = chunk["content"]
                 updated_history = history[:-1] + [(user_message, accumulated_response)]
                 yield updated_history, agent, ""
+            
+            # 중요한 점은 return아 아니라 yield를 사용하여 스트리밍 방식으로 결과를 반환한다는 것임.
         
         # 최종 응답
         final_history = history[:-1] + [(user_message, accumulated_response)]
