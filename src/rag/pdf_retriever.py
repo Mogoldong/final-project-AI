@@ -9,14 +9,15 @@ load_dotenv()
 CHROMA_PATH = "data/chromaDB/"
 COLLECTION_NAME = "food_knowledge"
 
+# 임베딩 모델 및 경로 설정
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-    model_kwargs={'device': 'cpu'},
+    model_kwargs={'device': 'cpu'}, # mps, cuda, cpu
     encode_kwargs={'normalize_embeddings': True}
 )
 
+# retriever.py와 유사
 try:
-    print(f"[Knowledge Retriever] '{COLLECTION_NAME}' 컬렉션 로드 중...")
     vector_db = Chroma(
         persist_directory=CHROMA_PATH,
         embedding_function=embeddings,
@@ -33,9 +34,7 @@ class KnowledgeSearchInput(BaseModel):
 def search_food_knowledge(input: KnowledgeSearchInput) -> List[Dict[str, Any]]:
     if not retriever:
         return [{"error": "Knowledge DB not available"}]
-
-    print(f"[Tool] search_food_knowledge: {input.query}")
     
-    docs = retriever.invoke(input.query)
+    docs = retriever.invoke(input.query) # invoke가 실행되면 사용자 질의는 벡터화되어 ChromaDB에서 유사한 문서 3개를 검색
     
     return [{"content": doc.page_content, "source": doc.metadata.get("source")} for doc in docs]

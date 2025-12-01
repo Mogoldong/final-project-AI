@@ -37,8 +37,6 @@ class RecipeSearchInput(BaseModel):
 def search_recipe(input: RecipeSearchInput) -> List[Dict[str, Any]]:
     if retriever is None:
         return [{"error": "RAG Retriever not loaded"}]
-        
-    print(f"[Tool] search_recipe: {input.query}")
     
     results_docs = retriever.invoke(input.query) # invoke가 실행되면 사용자 질의는 벡터화되어 ChromaDB에서 유사한 문서 3개를 검색
     
