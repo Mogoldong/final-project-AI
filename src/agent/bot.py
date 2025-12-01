@@ -130,9 +130,20 @@ class LangGraphAgent:
     
     # chkeck_interrupt 노드의 다음을 결정한다. 인터럽트 메세지가 있다면 종료하고 아니라면 계속 진행한다.
     def should_loop(self, state: AgentState) -> Literal["loop", END]:
-        last_message = state["messages"][-1]
+        messages = state["messages"]
+        last_message = messages[-1]
         
+        # 인터럽트 메시지가 발생한 경우 확인
         if isinstance(last_message, SystemMessage) and "인터럽트 발생" in last_message.content:
+            # 인터럽트 직전 메시지가 사용자 응답인지 확인
+            if len(messages) >= 2:
+                previous_message = messages[-2]
+                if isinstance(previous_message, HumanMessage):
+                    user_response = previous_message.content.strip().lower()
+                    # 사용자가 계속하겠다고 응답하면 loop
+                    if user_response in ["네", "계속", "yes", "y", "continue", "ㅇㅇ", "응", "ok"]:
+                        return "loop"
+            # 그 외의 경우 종료
             return END
         
         return "loop"
@@ -279,13 +290,15 @@ class LangGraphAgent:
     def check_interrupt(self, state: AgentState):
         current_count = state.get("google_search_count", 0)
         
+        # 검색 횟수가 4회 이상이면 경고 메시지 발생
         if current_count >= 4:
             interrupt_message = SystemMessage(
                 content=f"🚨 [알림] Google 검색 툴을 권장 한도(3회)를 초과하여 사용했습니다. "
                     f"하루 API 호출 한도는 100회입니다. (현재 {current_count}회 사용)\n\n"
                     f"그래도 계속 검색을 진행하시겠습니까? "
                     f"계속하려면 '네' 또는 '계속'이라고 입력해주세요. "
-                    f"중단하려면 다른 질문을 해주세요."
+                    f"중단하려면 다른 질문을 해주세요.\n\n"
+                    f"[인터럽트 발생]"
             )
             return {"messages": [interrupt_message]}
     
