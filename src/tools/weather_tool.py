@@ -15,7 +15,7 @@ class GetWeatherInput(BaseModel):
 
 def get_current_weather(input: GetWeatherInput) -> Dict[str, Any]:
     print(f"[Tool] get_current_weather: {input.location}")
-    api_key = os.getenv("WEATHER_API_KEY", "fca9276cce6d40fcae13687aed00a004fa87354fd41d093c5d66c10de2667020")
+    api_key = os.getenv("WEATHER_API_KEY")
     
     if not api_key:
         return {
