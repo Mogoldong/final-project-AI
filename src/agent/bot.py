@@ -4,7 +4,6 @@ from typing import TypedDict, Annotated, List, Literal, Generator, Dict, Any
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage, BaseMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
@@ -14,6 +13,45 @@ from src.agent.memory_extractor import extract_and_save_memory
 
 load_dotenv()
 
+class BaseMessage:
+    """기본 메시지 클래스"""
+    def __init__(self, content: str = "", **kwargs):
+        self.content = content
+        self.additional_kwargs = kwargs
+    
+    def __repr__(self):
+        return f"{self.__class__.__name__}(content='{self.content}')"
+
+
+class SystemMessage(BaseMessage):
+    """시스템 메시지"""
+    type: str = "system"
+
+
+class HumanMessage(BaseMessage):
+    """사용자 메시지"""
+    type: str = "human"
+
+
+class AIMessage(BaseMessage):
+    """AI 응답 메시지"""
+    type: str = "ai"
+    
+    def __init__(self, content: str = "", tool_calls: List[Dict] = None, **kwargs):
+        super().__init__(content, **kwargs)
+        self.tool_calls = tool_calls or []
+
+
+class ToolMessage(BaseMessage):
+    """도구 실행 결과 메시지"""
+    type: str = "tool"
+    
+    def __init__(self, content: str = "", tool_call_id: str = "", name: str = "", **kwargs):
+        super().__init__(content, **kwargs)
+        self.tool_call_id = tool_call_id
+        self.name = name
+
+# LangGraph의 상태를 정의한다. messages는 대화 기록을, google_search_count는 구글 검색 툴 사용 횟수를 추적한다.
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     google_search_count: int
@@ -22,8 +60,8 @@ class LangGraphAgent:
     def __init__(self, model: str = "gpt-4o-mini"):
         self.registry = register_default_tools()
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.llm = ChatOpenAI(model=model, api_key=self.api_key, temperature=0, streaming=True)
-        self.tools_schema = self.registry.list_openai_tools()
+        self.llm = ChatOpenAI(model=model, api_key=self.api_key, temperature=0, streaming=True) # Streaming 기능 활성화
+        self.tools_schema = self.registry.list_openai_tools() # LLM이 외부 도구를 사용할 수 있도록 도구 스키마를 가져옴
         self.llm_with_tools = self.llm.bind_tools(self.tools_schema)
 
         self.system_prompt = """
@@ -39,6 +77,7 @@ class LangGraphAgent:
         
         self.graph = self._build_graph()
 
+    # Agent 노드로 현재 상태에서 메세지를 LLM에 전달하고 응답(response)을 받는다.
     def call_model(self, state: AgentState):
         messages = state["messages"]
         
@@ -49,6 +88,7 @@ class LangGraphAgent:
         
         return {"messages": [response]}
 
+    # LLM이 요청한 툴에서 name, args, id를 추출하여 실행하고 ToolMessage 형태로 반환한다. 이 과정에서 google_search_count도 업데이트한다.
     def run_tools(self, state: AgentState):
         last_message = state["messages"][-1]
         tool_calls = last_message.tool_calls
@@ -77,6 +117,7 @@ class LangGraphAgent:
         
         return {"messages": results, "google_search_count": google_search_count + search_count_in_turn}
 
+    # Agent 노드의 다음을 결정한다. 인터럽트 발생이나 tool 호출 여부에 따라 분기한다. 
     def should_continue(self, state: AgentState) -> Literal["tools", END]:
         last_message = state["messages"][-1]
 
@@ -86,7 +127,8 @@ class LangGraphAgent:
         if last_message.tool_calls:
             return "tools"
         return END
-
+    
+    # chkeck_interrupt 노드의 다음을 결정한다. 인터럽트 메세지가 있다면 종료하고 아니라면 계속 진행한다.
     def should_loop(self, state: AgentState) -> Literal["loop", END]:
         last_message = state["messages"][-1]
         
@@ -95,9 +137,11 @@ class LangGraphAgent:
         
         return "loop"
 
+    # 그래프 구축
     def _build_graph(self):
         workflow = StateGraph(AgentState)
 
+        # 추론, 도구실행, 인터럽트 확인 3가지 노드 구현
         workflow.add_node("agent", self.call_model)
         workflow.add_node("tools", self.run_tools)
         workflow.add_node("check_interrupt", self.check_interrupt)
@@ -107,7 +151,7 @@ class LangGraphAgent:
             "agent",
             self.should_continue,
             {"tools": "tools", END: END}
-        )
+        ) # LLM이 도구 호출을 했느냐에 따라 tools 노드로 갈지 END로 갈지 결정하는 분기 로직
         
         workflow.add_edge("tools", "check_interrupt")
 
@@ -117,15 +161,15 @@ class LangGraphAgent:
             {
                 "loop": "agent",
                 END: END,
-            }
+            } # 인터럽트 발생 후 계속할지 종료할지 결정하는 분기 로직
         )
 
-        memory = MemorySaver()
+        memory = MemorySaver() # 체크포인터로 설정하여 messages와 google_search_count 를 thread id 별로 저장
         
         return workflow.compile(checkpointer=memory)
 
+    # 기존 버전
     def chat(self, user_text: str, thread_id: str = "default_thread") -> str:
-        """비-스트리밍 버전 (기존 호환성 유지)"""
         config = {"configurable": {"thread_id": thread_id}}
         
         events = self.graph.stream(
@@ -147,6 +191,7 @@ class LangGraphAgent:
         
         return final_response
     
+    # app.py의 handle_message_stream에서 요구하는 실시간 응답을 제공하는 메서드
     def chat_stream(self, user_text: str, thread_id: str = "default_thread") -> Generator[Dict[str, Any], None, None]:
         """
         스트리밍 버전 - 각 노드의 실행 결과를 실시간으로 반환
