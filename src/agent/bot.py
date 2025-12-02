@@ -4,64 +4,30 @@ from typing import TypedDict, Annotated, List, Literal, Generator, Dict, Any
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import interrupt, Command
 
 from src.agent.tool_registry import ToolRegistry, register_default_tools
 from src.agent.memory_extractor import extract_and_save_memory
 
 load_dotenv()
 
-class BaseMessage:
-    """기본 메시지 클래스"""
-    def __init__(self, content: str = "", **kwargs):
-        self.content = content
-        self.additional_kwargs = kwargs
-    
-    def __repr__(self):
-        return f"{self.__class__.__name__}(content='{self.content}')"
 
-
-class SystemMessage(BaseMessage):
-    """시스템 메시지"""
-    type: str = "system"
-
-
-class HumanMessage(BaseMessage):
-    """사용자 메시지"""
-    type: str = "human"
-
-
-class AIMessage(BaseMessage):
-    """AI 응답 메시지"""
-    type: str = "ai"
-    
-    def __init__(self, content: str = "", tool_calls: List[Dict] = None, **kwargs):
-        super().__init__(content, **kwargs)
-        self.tool_calls = tool_calls or []
-
-
-class ToolMessage(BaseMessage):
-    """도구 실행 결과 메시지"""
-    type: str = "tool"
-    
-    def __init__(self, content: str = "", tool_call_id: str = "", name: str = "", **kwargs):
-        super().__init__(content, **kwargs)
-        self.tool_call_id = tool_call_id
-        self.name = name
-
-# LangGraph의 상태를 정의한다. messages는 대화 기록을, google_search_count는 구글 검색 툴 사용 횟수를 추적한다.
+# LangGraph의 상태를 정의한다
 class AgentState(TypedDict):
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: Annotated[List, add_messages]
     google_search_count: int
+
 
 class LangGraphAgent:
     def __init__(self, model: str = "gpt-4o-mini"):
         self.registry = register_default_tools()
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.llm = ChatOpenAI(model=model, api_key=self.api_key, temperature=0, streaming=True) # Streaming 기능 활성화
-        self.tools_schema = self.registry.list_openai_tools() # LLM이 외부 도구를 사용할 수 있도록 도구 스키마를 가져옴
+        self.llm = ChatOpenAI(model=model, api_key=self.api_key, temperature=0, streaming=True)
+        self.tools_schema = self.registry.list_openai_tools()
         self.llm_with_tools = self.llm.bind_tools(self.tools_schema)
 
         self.system_prompt = """
@@ -69,26 +35,21 @@ class LangGraphAgent:
         - 사용자의 취향이나 알레르기 정보를 기억(read_memory)하고 활용하세요.
         - RAG(레시피/지식 검색)에 정보가 없거나, 재료 대체법 등 모르는 내용이 있으면 '구글 검색' 툴을 적극적으로 사용하세요.
         - 항상 친절하고 구체적으로 답변하세요.
-
-        ** 중요: Google 검색 횟수가 3회를 초과하면, 시스템이 경고 메시지를 보냅니다. 
-        이때 사용자가 '네', '계속', 'yes' 등으로 답변하면 검색을 계속 진행하고,
-        그 외의 답변이면 검색 없이 현재 정보로만 답변하세요.
         """
         
         self.graph = self._build_graph()
 
-    # Agent 노드로 현재 상태에서 메세지를 LLM에 전달하고 응답(response)을 받는다.
     def call_model(self, state: AgentState):
         messages = state["messages"]
         
-        if not isinstance(messages[0], SystemMessage):
+        # 시스템 프롬프트 추가
+        if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=self.system_prompt)] + messages
             
         response = self.llm_with_tools.invoke(messages)
         
         return {"messages": [response]}
 
-    # LLM이 요청한 툴에서 name, args, id를 추출하여 실행하고 ToolMessage 형태로 반환한다. 이 과정에서 google_search_count도 업데이트한다.
     def run_tools(self, state: AgentState):
         last_message = state["messages"][-1]
         tool_calls = last_message.tool_calls
@@ -117,124 +78,179 @@ class LangGraphAgent:
         
         return {"messages": results, "google_search_count": google_search_count + search_count_in_turn}
 
-    # Agent 노드의 다음을 결정한다. 인터럽트 발생이나 tool 호출 여부에 따라 분기한다. 
     def should_continue(self, state: AgentState) -> Literal["tools", END]:
         last_message = state["messages"][-1]
-
-        if isinstance(last_message, SystemMessage) and "인터럽트 발생" in last_message.content:
-            return END
         
-        if last_message.tool_calls:
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
             return "tools"
         return END
     
-    # chkeck_interrupt 노드의 다음을 결정한다. 인터럽트 메세지가 있다면 종료하고 아니라면 계속 진행한다.
-    def should_loop(self, state: AgentState) -> Literal["loop", END]:
-        messages = state["messages"]
-        last_message = messages[-1]
+    def check_interrupt(self, state: AgentState):
+        """
+        인터럽트 체크 노드
+        - 검색 횟수가 3회를 초과하면 interrupt() 호출
+        """
+        current_count = state.get("google_search_count", 0)
         
-        # 인터럽트 메시지가 발생한 경우 확인
-        if isinstance(last_message, SystemMessage) and "인터럽트 발생" in last_message.content:
-            # 인터럽트 직전 메시지가 사용자 응답인지 확인
-            if len(messages) >= 2:
-                previous_message = messages[-2]
-                if isinstance(previous_message, HumanMessage):
-                    user_response = previous_message.content.strip().lower()
-                    # 사용자가 계속하겠다고 응답하면 loop
-                    if user_response in ["네", "계속", "yes", "y", "continue", "ㅇㅇ", "응", "ok"]:
-                        return "loop"
-            # 그 외의 경우 종료
-            return END
+        # 검색 횟수가 3회를 초과하면 interrupt 발생
+        if current_count > 3:
+            # interrupt()를 호출하여 사용자 입력을 받음
+            user_input = interrupt(
+                f"🚨 Google 검색 한도 초과 알림\n\n"
+                f"현재 {current_count}회의 검색을 사용했습니다. (권장: 3회)\n"
+                f"하루 API 호출 한도는 100회입니다.\n\n"
+                f"계속 검색하시겠습니까?"
+            )
+            
+            # 사용자 응답이 있는 경우 처리
+            if user_input:
+                user_response = str(user_input).strip().lower()
+                
+                # 사용자가 계속 진행을 선택한 경우
+                if user_response in ["continue", "yes", "네", "계속", "y", "ㅇㅇ", "응", "ok"]:
+                    return {"messages": [SystemMessage(
+                        content="[시스템] 사용자가 검색 계속 진행을 승인했습니다."
+                    )]}
+                else:
+                    # 중단을 선택한 경우
+                    return {"messages": [SystemMessage(
+                        content="[시스템] 사용자가 검색 중단을 선택했습니다. 현재 정보로만 답변하세요."
+                    )]}
         
-        return "loop"
+        # 정상 진행
+        return {"messages": []}
 
-    # 그래프 구축
     def _build_graph(self):
         workflow = StateGraph(AgentState)
 
-        # 추론, 도구실행, 인터럽트 확인 3가지 노드 구현
+        # 노드 추가
         workflow.add_node("agent", self.call_model)
         workflow.add_node("tools", self.run_tools)
         workflow.add_node("check_interrupt", self.check_interrupt)
 
         workflow.set_entry_point("agent")
+        
+        # agent → tools 또는 END
         workflow.add_conditional_edges(
             "agent",
             self.should_continue,
-            {"tools": "tools", END: END}
-        ) # LLM이 도구 호출을 했느냐에 따라 tools 노드로 갈지 END로 갈지 결정하는 분기 로직
-        
-        workflow.add_edge("tools", "check_interrupt")
-
-        workflow.add_conditional_edges(
-            "check_interrupt",
-            self.should_loop,
             {
-                "loop": "agent",
-                END: END,
-            } # 인터럽트 발생 후 계속할지 종료할지 결정하는 분기 로직
+                "tools": "tools",
+                END: END
+            }
         )
+        
+        # tools → check_interrupt
+        workflow.add_edge("tools", "check_interrupt")
+        
+        # check_interrupt → agent
+        workflow.add_edge("check_interrupt", "agent")
 
-        memory = MemorySaver() # 체크포인터로 설정하여 messages와 google_search_count 를 thread id 별로 저장
+        memory = MemorySaver()
         
         return workflow.compile(checkpointer=memory)
 
-    # 기존 버전
     def chat(self, user_text: str, thread_id: str = "default_thread") -> str:
+        """
+        일반 채팅 메서드
+        
+        Returns:
+            str: AI의 응답 또는 interrupt 정보
+        """
         config = {"configurable": {"thread_id": thread_id}}
         
-        events = self.graph.stream(
+        result = self.graph.invoke(
             {"messages": [HumanMessage(content=user_text)]},
-            config, 
-            stream_mode="values"
+            config
         )
         
-        final_response = ""
-        for event in events:
-            if "messages" in event:
-                last_msg = event["messages"][-1]
-                if isinstance(last_msg, AIMessage) and not last_msg.tool_calls:
-                    final_response = last_msg.content
-                elif isinstance(last_msg, SystemMessage) and "인터럽트 발생" in last_msg.content:
-                    final_response = last_msg.content
+        # interrupt가 발생한 경우 확인
+        if "__interrupt__" in result:
+            interrupt_info = result["__interrupt__"][0].value
+            return f"[INTERRUPT] {interrupt_info}"
         
-        extract_and_save_memory(user_text, final_response)
+        # 정상 응답
+        final_response = ""
+        if "messages" in result:
+            last_msg = result["messages"][-1]
+            if isinstance(last_msg, AIMessage):
+                final_response = last_msg.content
+        
+        if final_response:
+            extract_and_save_memory(user_text, final_response)
         
         return final_response
     
-    # app.py의 handle_message_stream에서 요구하는 실시간 응답을 제공하는 메서드
+    def resume_chat(self, user_response: str, thread_id: str = "default_thread") -> str:
+        """
+        인터럽트 후 재개 메서드
+        
+        Args:
+            user_response: 사용자의 응답 (continue 또는 stop)
+            thread_id: 스레드 ID
+            
+        Returns:
+            str: AI의 최종 응답
+        """
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # Command(resume=...)로 재개
+        result = self.graph.invoke(
+            Command(resume=user_response),
+            config
+        )
+        
+        # 또 다른 interrupt가 발생한 경우
+        if "__interrupt__" in result:
+            interrupt_info = result["__interrupt__"][0].value
+            return f"[INTERRUPT] {interrupt_info}"
+        
+        # 정상 응답
+        final_response = ""
+        if "messages" in result:
+            last_msg = result["messages"][-1]
+            if isinstance(last_msg, AIMessage):
+                final_response = last_msg.content
+        
+        return final_response
+    
     def chat_stream(self, user_text: str, thread_id: str = "default_thread") -> Generator[Dict[str, Any], None, None]:
         """
-        스트리밍 버전 - 각 노드의 실행 결과를 실시간으로 반환
+        스트리밍 버전
         
-        Returns:
-            Generator yielding dictionaries with:
-            - node: 노드 이름
-            - type: 메시지 타입 (ai_message, tool_call, system_message 등)
-            - content: 메시지 내용
+        Yields:
+            dict: 각 노드의 실행 결과
         """
         config = {"configurable": {"thread_id": thread_id}}
         
         final_response = ""
+        interrupted = False
         
-        # stream_mode="updates"로 각 노드의 업데이트를 받음
         for event in self.graph.stream(
             {"messages": [HumanMessage(content=user_text)]},
             config,
             stream_mode="updates"
         ):
-            # event는 {node_name: update_value} 형태의 딕셔너리
             for node_name, update_value in event.items():
                 
-                # messages가 업데이트된 경우
+                # interrupt 체크
+                if "__interrupt__" in update_value:
+                    interrupted = True
+                    interrupt_info = update_value["__interrupt__"][0].value
+                    yield {
+                        "node": node_name,
+                        "type": "interrupt",
+                        "content": interrupt_info
+                    }
+                    continue
+                
                 if "messages" in update_value:
                     messages = update_value["messages"]
                     
                     for msg in messages:
                         # AIMessage 처리
                         if isinstance(msg, AIMessage):
-                            if msg.tool_calls:
-                                # 도구 호출
+                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
                                 for tool_call in msg.tool_calls:
                                     yield {
                                         "node": node_name,
@@ -243,7 +259,6 @@ class LangGraphAgent:
                                         "tool_args": tool_call["args"]
                                     }
                             elif msg.content:
-                                # 일반 AI 응답
                                 yield {
                                     "node": node_name,
                                     "type": "ai_message",
@@ -265,15 +280,13 @@ class LangGraphAgent:
                                 "result": tool_result
                             }
                         
-                        # SystemMessage 처리 (인터럽트 메시지)
+                        # SystemMessage 처리
                         elif isinstance(msg, SystemMessage):
-                            if "인터럽트 발생" in msg.content or "알림" in msg.content:
-                                yield {
-                                    "node": node_name,
-                                    "type": "system_message",
-                                    "content": msg.content
-                                }
-                                final_response = msg.content
+                            yield {
+                                "node": node_name,
+                                "type": "system_message",
+                                "content": msg.content
+                            }
                 
                 # google_search_count 업데이트
                 if "google_search_count" in update_value:
@@ -283,26 +296,79 @@ class LangGraphAgent:
                         "count": update_value["google_search_count"]
                     }
         
-        # 메모리 저장
-        if final_response:
+        # interrupt가 아닌 경우에만 메모리 저장
+        if final_response and not interrupted:
             extract_and_save_memory(user_text, final_response)
     
-    def check_interrupt(self, state: AgentState):
-        current_count = state.get("google_search_count", 0)
+    def stream_resume(self, user_response: str, thread_id: str = "default_thread") -> Generator[Dict[str, Any], None, None]:
+        """
+        인터럽트 후 재개 스트리밍
         
-        # 검색 횟수가 4회 이상이면 경고 메시지 발생
-        if current_count >= 4:
-            interrupt_message = SystemMessage(
-                content=f"🚨 [알림] Google 검색 툴을 권장 한도(3회)를 초과하여 사용했습니다. "
-                    f"하루 API 호출 한도는 100회입니다. (현재 {current_count}회 사용)\n\n"
-                    f"그래도 계속 검색을 진행하시겠습니까? "
-                    f"계속하려면 '네' 또는 '계속'이라고 입력해주세요. "
-                    f"중단하려면 다른 질문을 해주세요.\n\n"
-                    f"[인터럽트 발생]"
-            )
-            return {"messages": [interrupt_message]}
-    
-        return {"messages": []}
+        Args:
+            user_response: 사용자의 응답
+            thread_id: 스레드 ID
+            
+        Yields:
+            dict: 각 노드의 실행 결과
+        """
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        for event in self.graph.stream(
+            Command(resume=user_response),
+            config,
+            stream_mode="updates"
+        ):
+            for node_name, update_value in event.items():
+                
+                # interrupt 체크
+                if "__interrupt__" in update_value:
+                    interrupt_info = update_value["__interrupt__"][0].value
+                    yield {
+                        "node": node_name,
+                        "type": "interrupt",
+                        "content": interrupt_info
+                    }
+                    continue
+                
+                if "messages" in update_value:
+                    messages = update_value["messages"]
+                    
+                    for msg in messages:
+                        if isinstance(msg, AIMessage):
+                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                for tool_call in msg.tool_calls:
+                                    yield {
+                                        "node": node_name,
+                                        "type": "tool_call",
+                                        "tool_name": tool_call["name"],
+                                        "tool_args": tool_call["args"]
+                                    }
+                            elif msg.content:
+                                yield {
+                                    "node": node_name,
+                                    "type": "ai_message",
+                                    "content": msg.content
+                                }
+                        
+                        elif isinstance(msg, ToolMessage):
+                            try:
+                                tool_result = json.loads(msg.content)
+                            except:
+                                tool_result = msg.content
+                            
+                            yield {
+                                "node": node_name,
+                                "type": "tool_result",
+                                "tool_name": msg.name,
+                                "result": tool_result
+                            }
+                        
+                        elif isinstance(msg, SystemMessage):
+                            yield {
+                                "node": node_name,
+                                "type": "system_message",
+                                "content": msg.content
+                            }
 
 
 def make_agent(model: str = "gpt-4o-mini") -> LangGraphAgent:
