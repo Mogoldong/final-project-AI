@@ -13,8 +13,7 @@ from src.agent.bot import make_agent
 ChatHistory = List[Tuple[str, str]]
 
 INTRO_MD = """
-## 셰프봇 레시피 추천기
-이제 도시나 기분을 따로 입력하는 대신 자연어로 자유롭게 대화하세요.
+## 셰프봇 레시피 추천기 - 생레응(생성형 레시피 응용)
 셰프봇은 날씨, 시간, 레시피 RAG, 구글 검색, 메모리 등 다양한 도구를 스스로 호출해 가장 알맞은 답을 찾아드립니다.
 """
 
