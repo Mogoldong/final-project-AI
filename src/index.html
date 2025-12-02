@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 셰프 : 생레응</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* 기본 스타일 초기화 */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: "Noto Sans KR", sans-serif;
+      }
+
+      body {
+        background-color: #fff5f0; /* 아주 연한 살구색 배경 */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        color: #333;
+      }
+
+      /* 카드 컨테이너 스타일 */
+      .container {
+        background-color: white;
+        padding: 3rem;
+        border-radius: 20px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        max-width: 400px;
+        width: 90%;
+        transition: transform 0.3s ease;
+      }
+
+      .container:hover {
+        transform: translateY(-5px);
+      }
+
+      /* 제목 스타일 */
+      h1 {
+        font-size: 2rem;
+        color: #ff6b6b; /* 식욕 돋우는 코랄 오렌지 */
+        margin-bottom: 0.5rem;
+      }
+
+      .subtitle {
+        font-size: 1rem;
+        color: #666;
+        margin-bottom: 2.5rem;
+      }
+
+      /* 아이콘 (이모지) */
+      .mascot {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        display: block;
+        animation: bounce 2s infinite;
+      }
+
+      /* 버튼 공통 스타일 */
+      .btn {
+        display: block;
+        width: 100%;
+        padding: 15px;
+        margin-bottom: 1rem;
+        border-radius: 12px;
+        text-decoration: none;
+        font-weight: 700;
+        transition: all 0.3s ease;
+        border: none;
+        cursor: pointer;
+      }
+
+      /* 메인 버튼 (요리 시작) */
+      .btn-primary {
+        background-color: #ff6b6b;
+        color: white;
+        box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+      }
+
+      .btn-primary:hover {
+        background-color: #fa5252;
+        transform: scale(1.02);
+      }
+
+      /* 서브 버튼 (API 문서) */
+      .btn-secondary {
+        background-color: #f1f3f5;
+        color: #495057;
+      }
+
+      .btn-secondary:hover {
+        background-color: #e9ecef;
+        color: #212529;
+      }
+
+      /* 푸터 */
+      .footer {
+        margin-top: 2rem;
+        font-size: 0.8rem;
+        color: #adb5bd;
+      }
+
+      /* 애니메이션 */
+      @keyframes bounce {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-10px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <span class="mascot">👨‍🍳</span>
+      <h1>AI 셰프 생레응</h1>
+      <p class="subtitle">
+        냉장고 속 재료로 만드는 기적<br />당신만의 레시피를 찾아드립니다.
+      </p>
+
+      <a href="/ui" class="btn btn-primary"> 🍳 요리 시작하기 (Chat) </a>
+
+      <a href="/docs" class="btn btn-secondary"> 📄 개발자 문서 (API Docs) </a>
+
+      <div class="footer">Powered by FastAPI & Gradio</div>
+    </div>
+  </body>
+</html>
