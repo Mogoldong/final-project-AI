@@ -13,3 +13,4 @@ tiktoken
 requests
 sentence-transformers
 pypdf
+fastapi
