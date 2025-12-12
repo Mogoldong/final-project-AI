@@ -1,7 +1,7 @@
 import uuid
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
 
@@ -10,7 +10,12 @@ load_dotenv()
 CHROMA_PATH = "data/chromaDB"
 COLLECTION_NAME = "memory_store"
 
-embeddings = OpenAIEmbeddings()
+# 다른 RAG와 동일한 한영 multilingual 임베딩 사용
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': True}
+)
 
 vector_store = Chroma(
     collection_name=COLLECTION_NAME,
