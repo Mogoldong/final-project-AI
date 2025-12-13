@@ -17,6 +17,12 @@ INTRO_MD = """
 셰프봇은 날씨, 시간, 레시피 RAG, 구글 검색, 메모리 등 다양한 도구를 스스로 호출해 가장 알맞은 답을 찾아드립니다.
 """
 
+# 전역 interrupt 상태 관리
+interrupt_state = {
+    "active": False,
+    "thread_id": "default_thread"
+}
+
 
 # 에이전트 객체 확인 및 생성
 def _ensure_agent(agent_state: Any) -> Any:
@@ -28,47 +34,92 @@ def handle_message_stream(
     user_message: str, history: ChatHistory, agent_state: Optional[Any]
 ) -> Generator[Tuple[ChatHistory, Any, str], None, None]:
     
+    global interrupt_state
+    
     if not user_message or not user_message.strip():
         raise gr.Error("메시지를 입력해주세요.")
 
     history = history or []
     agent = _ensure_agent(agent_state)
 
-    # 사용자 메시지 추가
+    # interrupt 상태에서 사용자 응답 처리
+    if interrupt_state["active"]:
+        interrupt_state["active"] = False
+        
+        # 사용자 메시지 추가
+        history = history + [(user_message, "")]
+        
+        print(f"[DEBUG] Resuming with: {user_message.strip()}")
+
+        # 재개
+        accumulated_response = ""
+        try:
+            for chunk in agent.stream_resume(user_message.strip(), interrupt_state["thread_id"]):
+                if chunk["type"] == "ai_message":
+                    accumulated_response = chunk["content"]
+                    updated_history = history[:-1] + [(user_message, accumulated_response)]
+                    yield updated_history, agent, ""
+                
+                elif chunk["type"] == "tool_call":
+                    tool_name = chunk["tool_name"]
+                    tool_info = f"\n\n🔧 [{tool_name} 실행 중...]"
+                    updated_history = history[:-1] + [(user_message, accumulated_response + tool_info)]
+                    yield updated_history, agent, ""
+            
+            # 최종 응답
+            final_history = history[:-1] + [(user_message, accumulated_response)]
+            yield final_history, agent, ""
+            return
+            
+        except Exception as exc:
+            error_msg = f"❌ 재개 중 문제가 발생했습니다: {exc}"
+            error_history = history[:-1] + [(user_message, error_msg)]
+            yield error_history, agent, ""
+            return
+
+    # 일반 대화 처리
     history = history + [(user_message, "")]
     
     try:
         accumulated_response = ""
         tool_info = ""
         
-        for chunk in agent.chat_stream(user_message.strip()): # agent의 chat_stream에서 넘어오는 청크의 타입을 분석
+        for chunk in agent.chat_stream(user_message.strip(), interrupt_state["thread_id"]):
+            
+            # interrupt 발생 체크
+            if chunk["type"] == "interrupt":
+                interrupt_state["active"] = True
+                
+                # interrupt 메시지 표시
+                interrupt_msg = chunk["content"].get("message", "검색 한도에 도달했습니다.")
+                accumulated_response = f"⚠️ {interrupt_msg}\n\n('응' 또는 '아니'로 답변해주세요)"
+                updated_history = history[:-1] + [(user_message, accumulated_response)]
+                yield updated_history, agent, ""
+                return
             
             # AI 메시지 스트리밍
-            if chunk["type"] == "ai_message": # 에이전트의 메세지로 accumulated_response에 누적되며 실시간으로 출력된다. 
+            elif chunk["type"] == "ai_message":
                 accumulated_response = chunk["content"]
                 updated_history = history[:-1] + [(user_message, accumulated_response)]
                 yield updated_history, agent, ""
             
             # 도구 호출 표시
-            elif chunk["type"] == "tool_call": # 에이전트가 외부 도구를 호출했음을 알리며 내부 활동을 사용자에게 알린다. 
+            elif chunk["type"] == "tool_call":
                 tool_name = chunk["tool_name"]
                 tool_info = f"\n\n🔧 [{tool_name} 실행 중...]"
                 updated_history = history[:-1] + [(user_message, accumulated_response + tool_info)]
                 yield updated_history, agent, ""
             
-            # elif chunk["type"] == "tool_result":
-            #     tool_name = chunk["tool_name"]
-            #     tool_info = f"\n\n[{tool_name} 완료]"
-            #     updated_history = history[:-1] + [(user_message, accumulated_response + tool_info)]
+            # 시스템 메시지
+            elif chunk["type"] == "system_message":
+                system_msg = chunk["content"]
+                pass
+            
+            # 검색 횟수 표시 
+            # elif chunk["type"] == "search_count":
+            #     count_info = f"\n\n_📊 검색 횟수: {chunk['count']}회_"
+            #     updated_history = history[:-1] + [(user_message, accumulated_response + count_info)]
             #     yield updated_history, agent, ""
-            
-            # 시스템 메시지 (인터럽트)
-            elif chunk["type"] == "system_message": # Google 검색 한도 초과와 같은 Interrupt 또는 시스템 메세지를 처리한다. 
-                accumulated_response = chunk["content"]
-                updated_history = history[:-1] + [(user_message, accumulated_response)]
-                yield updated_history, agent, ""
-            
-            # 중요한 점은 return아 아니라 yield를 사용하여 스트리밍 방식으로 결과를 반환한다는 것임.
         
         # 최종 응답
         final_history = history[:-1] + [(user_message, accumulated_response)]
@@ -82,6 +133,8 @@ def handle_message_stream(
 
 # 대화 초기화 함수
 def reset_conversation() -> Tuple[ChatHistory, None, str]:
+    global interrupt_state
+    interrupt_state["active"] = False
     return [], None, ""
 
 

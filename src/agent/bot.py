@@ -96,26 +96,27 @@ class LangGraphAgent:
         if current_count > 3:
             # interrupt()를 호출하여 사용자 입력을 받음
             user_input = interrupt(
-                f"🚨 Google 검색 한도 초과 알림\n\n"
                 f"현재 {current_count}회의 검색을 사용했습니다. (권장: 3회)\n"
-                f"하루 API 호출 한도는 100회입니다.\n\n"
                 f"계속 검색하시겠습니까?"
             )
             
+            if user_input is None:
+                return {"messages": []}
+
             # 사용자 응답이 있는 경우 처리
-            if user_input:
-                user_response = str(user_input).strip().lower()
+            user_response = str(user_input).strip().lower()
                 
                 # 사용자가 계속 진행을 선택한 경우
-                if user_response in ["continue", "yes", "네", "계속", "y", "ㅇㅇ", "응", "ok"]:
-                    return {"messages": [SystemMessage(
+            if user_response in ["continue", "yes", "네", "계속", "y", "ㅇㅇ", "응", "ok"]:
+                return {"messages": [SystemMessage(
                         content="[시스템] 사용자가 검색 계속 진행을 승인했습니다."
-                    )]}
-                else:
-                    # 중단을 선택한 경우
-                    return {"messages": [SystemMessage(
-                        content="[시스템] 사용자가 검색 중단을 선택했습니다. 현재 정보로만 답변하세요."
-                    )]}
+                )]}
+            else:
+                # 중단을 선택한 경우
+                return {"messages": [
+                SystemMessage(content="[시스템] 사용자가 검색 중단을 선택했습니다. 현재 정보로만 답변하세요."),
+                AIMessage(content="검색을 중단했습니다. 현재까지 찾은 정보로 답변드리겠습니다.")
+            ]}
         
         # 정상 진행
         return {"messages": []}
@@ -214,41 +215,40 @@ class LangGraphAgent:
         
         return final_response
     
-    def chat_stream(self, user_text: str, thread_id: str = "default_thread") -> Generator[Dict[str, Any], None, None]:
+    def _process_stream_events(self, events) -> Generator[Dict[str, Any], None, None]:
         """
-        스트리밍 버전
-        
-        Yields:
-            dict: 각 노드의 실행 결과
+        스트림 이벤트를 처리하는 공통 헬퍼 메서드
         """
-        config = {"configurable": {"thread_id": thread_id}}
-        
         final_response = ""
         interrupted = False
-        
-        for event in self.graph.stream(
-            {"messages": [HumanMessage(content=user_text)]},
-            config,
-            stream_mode="updates"
-        ):
-            for node_name, update_value in event.items():
+
+        for event in events:
+            if "__interrupt__" in event:
+                interrupted = True
+                interrupt_data = event["__interrupt__"][0]
                 
-                # interrupt 체크
-                if "__interrupt__" in update_value:
-                    interrupted = True
-                    interrupt_info = update_value["__interrupt__"][0].value
-                    yield {
-                        "node": node_name,
-                        "type": "interrupt",
-                        "content": interrupt_info
+                if hasattr(interrupt_data, 'value'):
+                    interrupt_info = interrupt_data.value
+                else:
+                    interrupt_info = interrupt_data
+                
+                yield {
+                    "node": "check_interrupt",
+                    "type": "interrupt",
+                    "content": {
+                        "message": str(interrupt_info)
                     }
+                }
+                continue
+
+            for node_name, update_value in event.items():
+                if not isinstance(update_value, dict):
                     continue
-                
+
                 if "messages" in update_value:
                     messages = update_value["messages"]
-                    
+
                     for msg in messages:
-                        # AIMessage 처리
                         if isinstance(msg, AIMessage):
                             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                                 for tool_call in msg.tool_calls:
@@ -265,37 +265,54 @@ class LangGraphAgent:
                                     "content": msg.content
                                 }
                                 final_response = msg.content
-                        
-                        # ToolMessage 처리
+
                         elif isinstance(msg, ToolMessage):
                             try:
                                 tool_result = json.loads(msg.content)
                             except:
                                 tool_result = msg.content
-                            
+
                             yield {
                                 "node": node_name,
                                 "type": "tool_result",
                                 "tool_name": msg.name,
                                 "result": tool_result
                             }
-                        
-                        # SystemMessage 처리
+
                         elif isinstance(msg, SystemMessage):
                             yield {
                                 "node": node_name,
                                 "type": "system_message",
                                 "content": msg.content
                             }
-                
-                # google_search_count 업데이트
+
                 if "google_search_count" in update_value:
                     yield {
                         "node": node_name,
                         "type": "search_count",
                         "count": update_value["google_search_count"]
                     }
-        
+
+        return final_response, interrupted
+
+    def chat_stream(self, user_text: str, thread_id: str = "default_thread") -> Generator[Dict[str, Any], None, None]:
+        """
+        스트리밍 버전
+
+        Yields:
+            dict: 각 노드의 실행 결과
+        """
+        config = {"configurable": {"thread_id": thread_id}}
+
+        events = self.graph.stream(
+            {"messages": [HumanMessage(content=user_text)]},
+            config,
+            stream_mode="updates"
+        )
+
+        # 공통 이벤트 처리 로직 사용
+        final_response, interrupted = yield from self._process_stream_events(events)
+
         # interrupt가 아닌 경우에만 메모리 저장
         if final_response and not interrupted:
             extract_and_save_memory(user_text, final_response)
@@ -303,72 +320,24 @@ class LangGraphAgent:
     def stream_resume(self, user_response: str, thread_id: str = "default_thread") -> Generator[Dict[str, Any], None, None]:
         """
         인터럽트 후 재개 스트리밍
-        
+
         Args:
             user_response: 사용자의 응답
             thread_id: 스레드 ID
-            
+
         Yields:
             dict: 각 노드의 실행 결과
         """
         config = {"configurable": {"thread_id": thread_id}}
-        
-        for event in self.graph.stream(
+
+        events = self.graph.stream(
             Command(resume=user_response),
             config,
             stream_mode="updates"
-        ):
-            for node_name, update_value in event.items():
-                
-                # interrupt 체크
-                if "__interrupt__" in update_value:
-                    interrupt_info = update_value["__interrupt__"][0].value
-                    yield {
-                        "node": node_name,
-                        "type": "interrupt",
-                        "content": interrupt_info
-                    }
-                    continue
-                
-                if "messages" in update_value:
-                    messages = update_value["messages"]
-                    
-                    for msg in messages:
-                        if isinstance(msg, AIMessage):
-                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                                for tool_call in msg.tool_calls:
-                                    yield {
-                                        "node": node_name,
-                                        "type": "tool_call",
-                                        "tool_name": tool_call["name"],
-                                        "tool_args": tool_call["args"]
-                                    }
-                            elif msg.content:
-                                yield {
-                                    "node": node_name,
-                                    "type": "ai_message",
-                                    "content": msg.content
-                                }
-                        
-                        elif isinstance(msg, ToolMessage):
-                            try:
-                                tool_result = json.loads(msg.content)
-                            except:
-                                tool_result = msg.content
-                            
-                            yield {
-                                "node": node_name,
-                                "type": "tool_result",
-                                "tool_name": msg.name,
-                                "result": tool_result
-                            }
-                        
-                        elif isinstance(msg, SystemMessage):
-                            yield {
-                                "node": node_name,
-                                "type": "system_message",
-                                "content": msg.content
-                            }
+        )
+
+        # 공통 이벤트 처리 로직 사용
+        yield from self._process_stream_events(events)
 
 
 def make_agent(model: str = "gpt-4o-mini") -> LangGraphAgent:
