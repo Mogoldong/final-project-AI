@@ -4,7 +4,6 @@ from typing import TypedDict, Annotated, List, Literal, Generator, Dict, Any
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
@@ -14,6 +13,65 @@ from src.agent.tool_registry import ToolRegistry, register_default_tools
 from src.agent.memory_extractor import extract_and_save_memory
 
 load_dotenv()
+
+
+# 메시지 헬퍼 함수들
+def system_msg(content: str) -> dict:
+    return {"role": "system", "content": content}
+
+
+def user_msg(content: str) -> dict:
+    return {"role": "user", "content": content}
+
+
+def assistant_msg(content: str, tool_calls: list = None) -> dict:
+    msg = {"role": "assistant", "content": content}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    return msg
+
+
+def tool_msg(tool_call_id: str, content: str, name: str = None) -> dict:
+    msg = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+    if name:
+        msg["name"] = name
+    return msg
+
+
+def is_system_msg(msg) -> bool:
+    if isinstance(msg, dict):
+        return msg.get("role") == "system"
+    return getattr(msg, "type", None) == "system"
+
+
+def is_ai_msg(msg) -> bool:
+    if isinstance(msg, dict):
+        return msg.get("role") == "assistant"
+    return getattr(msg, "type", None) == "ai"
+
+
+def is_tool_msg(msg) -> bool:
+    if isinstance(msg, dict):
+        return msg.get("role") == "tool"
+    return getattr(msg, "type", None) == "tool"
+
+
+def get_content(msg) -> str:
+    if isinstance(msg, dict):
+        return msg.get("content", "")
+    return getattr(msg, "content", "")
+
+
+def get_tool_calls(msg) -> list:
+    if isinstance(msg, dict):
+        return msg.get("tool_calls", [])
+    return getattr(msg, "tool_calls", [])
+
+
+def get_tool_name(msg) -> str:
+    if isinstance(msg, dict):
+        return msg.get("name", "")
+    return getattr(msg, "name", "")
 
 
 # LangGraph의 상태를 정의한다
@@ -41,25 +99,25 @@ class LangGraphAgent:
 
     def call_model(self, state: AgentState):
         messages = state["messages"]
-        
+
         # 시스템 프롬프트 추가
-        if not messages or not isinstance(messages[0], SystemMessage):
-            messages = [SystemMessage(content=self.system_prompt)] + messages
-            
+        if not messages or not is_system_msg(messages[0]):
+            messages = [system_msg(self.system_prompt)] + messages
+
         response = self.llm_with_tools.invoke(messages)
-        
+
         return {"messages": [response]}
 
     def run_tools(self, state: AgentState):
         last_message = state["messages"][-1]
-        tool_calls = last_message.tool_calls
-        
+        tool_calls = get_tool_calls(last_message)
+
         results = []
         for tool_call in tool_calls:
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
             tool_id = tool_call["id"]
-            
+
             try:
                 tool_output = self.registry.call(tool_name, tool_args)
             except Exception as e:
@@ -67,21 +125,22 @@ class LangGraphAgent:
 
             content = json.dumps(tool_output, ensure_ascii=False)
 
-            results.append(ToolMessage(
+            results.append(tool_msg(
                 tool_call_id=tool_id,
                 name=tool_name,
                 content=content
             ))
-            
+
         google_search_count = state.get("google_search_count", 0)
-        search_count_in_turn = sum(1 for msg in results if msg.name == 'search_google')
-        
+        search_count_in_turn = sum(1 for msg in results if msg.get("name") == 'search_google')
+
         return {"messages": results, "google_search_count": google_search_count + search_count_in_turn}
 
     def should_continue(self, state: AgentState) -> Literal["tools", END]:
         last_message = state["messages"][-1]
-        
-        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+        tool_calls = get_tool_calls(last_message)
+
+        if tool_calls:
             return "tools"
         return END
     
@@ -91,7 +150,7 @@ class LangGraphAgent:
         - 검색 횟수가 3회를 초과하면 interrupt() 호출
         """
         current_count = state.get("google_search_count", 0)
-        
+
         # 검색 횟수가 3회를 초과하면 interrupt 발생
         if current_count > 3:
             # interrupt()를 호출하여 사용자 입력을 받음
@@ -99,25 +158,25 @@ class LangGraphAgent:
                 f"현재 {current_count}회의 검색을 사용했습니다. (권장: 3회)\n"
                 f"계속 검색하시겠습니까?"
             )
-            
+
             if user_input is None:
                 return {"messages": []}
 
             # 사용자 응답이 있는 경우 처리
             user_response = str(user_input).strip().lower()
-                
-                # 사용자가 계속 진행을 선택한 경우
+
+            # 사용자가 계속 진행을 선택한 경우
             if user_response in ["continue", "yes", "네", "계속", "y", "ㅇㅇ", "응", "ok"]:
-                return {"messages": [SystemMessage(
-                        content="[시스템] 사용자가 검색 계속 진행을 승인했습니다."
-                )]}
+                return {"messages": [
+                    system_msg("[시스템] 사용자가 검색 계속 진행을 승인했습니다.")
+                ]}
             else:
                 # 중단을 선택한 경우
                 return {"messages": [
-                SystemMessage(content="[시스템] 사용자가 검색 중단을 선택했습니다. 현재 정보로만 답변하세요."),
-                AIMessage(content="검색을 중단했습니다. 현재까지 찾은 정보로 답변드리겠습니다.")
-            ]}
-        
+                    system_msg("[시스템] 사용자가 검색 중단을 선택했습니다. 현재 정보로만 답변하세요."),
+                    assistant_msg("검색을 중단했습니다. 현재까지 찾은 정보로 답변드리겠습니다.")
+                ]}
+
         # 정상 진행
         return {"messages": []}
 
@@ -161,21 +220,21 @@ class LangGraphAgent:
         config = {"configurable": {"thread_id": thread_id}}
         
         result = self.graph.invoke(
-            {"messages": [HumanMessage(content=user_text)]},
+            {"messages": [user_msg(user_text)]},
             config
         )
-        
+
         # interrupt가 발생한 경우 확인
         if "__interrupt__" in result:
             interrupt_info = result["__interrupt__"][0].value
             return f"[INTERRUPT] {interrupt_info}"
-        
+
         # 정상 응답
         final_response = ""
         if "messages" in result:
             last_msg = result["messages"][-1]
-            if isinstance(last_msg, AIMessage):
-                final_response = last_msg.content
+            if is_ai_msg(last_msg):
+                final_response = get_content(last_msg)
         
         if final_response:
             extract_and_save_memory(user_text, final_response)
@@ -205,14 +264,14 @@ class LangGraphAgent:
         if "__interrupt__" in result:
             interrupt_info = result["__interrupt__"][0].value
             return f"[INTERRUPT] {interrupt_info}"
-        
+
         # 정상 응답
         final_response = ""
         if "messages" in result:
             last_msg = result["messages"][-1]
-            if isinstance(last_msg, AIMessage):
-                final_response = last_msg.content
-        
+            if is_ai_msg(last_msg):
+                final_response = get_content(last_msg)
+
         return final_response
     
     def _process_stream_events(self, events) -> Generator[Dict[str, Any], None, None]:
@@ -249,41 +308,42 @@ class LangGraphAgent:
                     messages = update_value["messages"]
 
                     for msg in messages:
-                        if isinstance(msg, AIMessage):
-                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                                for tool_call in msg.tool_calls:
+                        if is_ai_msg(msg):
+                            tool_calls = get_tool_calls(msg)
+                            if tool_calls:
+                                for tool_call in tool_calls:
                                     yield {
                                         "node": node_name,
                                         "type": "tool_call",
                                         "tool_name": tool_call["name"],
                                         "tool_args": tool_call["args"]
                                     }
-                            elif msg.content:
+                            elif get_content(msg):
                                 yield {
                                     "node": node_name,
                                     "type": "ai_message",
-                                    "content": msg.content
+                                    "content": get_content(msg)
                                 }
-                                final_response = msg.content
+                                final_response = get_content(msg)
 
-                        elif isinstance(msg, ToolMessage):
+                        elif is_tool_msg(msg):
                             try:
-                                tool_result = json.loads(msg.content)
+                                tool_result = json.loads(get_content(msg))
                             except:
-                                tool_result = msg.content
+                                tool_result = get_content(msg)
 
                             yield {
                                 "node": node_name,
                                 "type": "tool_result",
-                                "tool_name": msg.name,
+                                "tool_name": get_tool_name(msg),
                                 "result": tool_result
                             }
 
-                        elif isinstance(msg, SystemMessage):
+                        elif is_system_msg(msg):
                             yield {
                                 "node": node_name,
                                 "type": "system_message",
-                                "content": msg.content
+                                "content": get_content(msg)
                             }
 
                 if "google_search_count" in update_value:
@@ -305,7 +365,7 @@ class LangGraphAgent:
         config = {"configurable": {"thread_id": thread_id}}
 
         events = self.graph.stream(
-            {"messages": [HumanMessage(content=user_text)]},
+            {"messages": [user_msg(user_text)]},
             config,
             stream_mode="updates"
         )
