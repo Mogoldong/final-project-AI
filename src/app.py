@@ -146,6 +146,7 @@ def build_interface() -> gr.Blocks:
             label="셰프봇과의 대화",
             height=400,
             show_label=True,
+            type="tuples"
         )
         user_input = gr.Textbox(
             label="메시지",
