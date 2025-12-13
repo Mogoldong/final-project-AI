@@ -117,7 +117,7 @@ class LangGraphAgent:
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
             tool_id = tool_call["id"]
-
+            print(f"Tool 실행: {tool_name}")
             try:
                 tool_output = self.registry.call(tool_name, tool_args)
             except Exception as e:

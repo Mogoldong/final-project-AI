@@ -178,4 +178,4 @@ def build_interface() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    build_interface().queue().launch()
+    build_interface().queue().launch(share=True)
