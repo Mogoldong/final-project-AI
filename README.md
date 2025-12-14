@@ -3,7 +3,6 @@
 생레응 - 사용자의 상황과 기분에 맞춰 요리를 추천하는 에이전트
 
 ## 워크플로우 다이어그램
-
 ```mermaid
 graph TD
     Start([사용자 입력<br/>HumanMessage]) --> Agent
@@ -110,7 +109,6 @@ else:
 ```
 
 ## 상태 관리
-
 ```python
 class AgentState(TypedDict):
     messages: List[BaseMessage]  # 대화 기록
@@ -130,17 +128,53 @@ class AgentState(TypedDict):
 
 - **MemorySaver**: thread_id별로 상태를 저장하여 대화 컨텍스트 유지
 
-## 사용 방법
+## 설치 및 실행
 
-### 스트리밍 채팅
-```python
-agent = make_agent()
-for event in agent.chat_stream("파스타 레시피 알려줘", thread_id="user_123"):
-    if event["type"] == "ai_message":
-        print(event["content"])
-    elif event["type"] == "tool_call":
-        print(f"🔧 도구 실행: {event['tool_name']}")
+### 1. 필요한 패키지 설치
+```bash
+pip install -r requirements.txt
 ```
+
+### 2. 환경 변수 설정
+`.env` 파일을 프로젝트 루트에 생성하고 다음 정보를 입력:
+```bash
+OPENAI_API_KEY=your_api_key_here
+GOOGLE_API_KEY=your_api_key_here
+GOOGLE_CSE_ID=your_api_key_here
+```
+
+### 3. 벡터 DB 구축 (최초 1회)
+```bash
+python src/rag/builder.py
+python src/rag/pdf_builder.py
+```
+
+### 4. 서버 실행
+```bash
+python -m src.server
+```
+
+### 5. 접속
+서버가 시작되면 다음 URL로 접속 가능:
+- **Gradio UI**: http://localhost:8000/ui
+- **FastAPI 메인**: http://localhost:8000
+- **API 문서**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/health
+
+## API 사용 예시
+
+### REST API
+```bash
+curl -X POST "http://localhost:8000/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "오늘 저녁 뭐 먹을까?",
+    "thread_id": "user_123"
+  }'
+```
+
+### Gradio UI (권장)
+브라우저에서 http://localhost:8000/ui 로 접속하여 대화형 인터페이스 사용
 
 ## 메시지 타입
 
@@ -157,14 +191,24 @@ for event in agent.chat_stream("파스타 레시피 알려줘", thread_id="user_
 ✅ RAG 및 Google 검색 통합  
 ✅ 사용자 취향/알레르기 정보 저장  
 ✅ 명확한 State 관리 및 추적  
+✅ FastAPI + Gradio 통합  
+✅ REST API 제공  
 
 ## 환경 변수
-
 ```bash
 OPENAI_API_KEY=your_api_key_here
 GOOGLE_API_KEY=your_api_key_here
 GOOGLE_CSE_ID=your_api_key_here
 ```
+
+## 팀원 역할 분담
+
+| 담당자 | 역할 | 담당 파일 |
+|--------|------|-----------|
+| **서준익** | - Gradio 인터페이스 구현<br/>- 스트리밍 응답 처리<br/>- 전체 시스템 통합<br/>- 보고서 작성 | `src/app.py`<br/>`src/server.py` |
+| **이수현** | - LangGraph 워크플로우 구현<br/>- State 관리 및 체크포인터<br/>- Interrupt 메커니즘 설계<br/>- 보고서 작성<br/>- 팀장 | `src/agent/bot.py`<br/>`src/agent/tool_registry.py` |
+| **정성훈** | - 벡터 DB 구축 및 관리<br/>- 임베딩 모델 선정<br/>- 레시피/지식 검색 구현 | `src/rag/*`<br/>`src/data/*` |
+| **조은기** | - 외부 API 연동<br/>- 장기 기억 시스템 구현<br/>- 메모리 추출 로직 설계 | `src/tools/*`<br/>`src/agent/memory_extractor.py` |
 
 ## Contributors
 <table>
@@ -176,16 +220,16 @@ GOOGLE_CSE_ID=your_api_key_here
         <sub><b>서준익</b></sub>
       </a>
       <br />
-      <sub>역할: AI 에이전트 설계 및 프론트엔드 개발</sub>
+      <sub>UI 개발 및 통합</sub>
     </td>
     <td align="center">
       <a href="https://github.com/JustinLee02">
         <img src="https://github.com/JustinLee02.png" width="100px;" alt=""/>
         <br />
-        <sub><b>이수현</b></sub>
+        <sub><b>이수현 (팀장)</b></sub>
       </a>
       <br />
-      <sub>역할: AI 에이전트 설계</sub>
+      <sub>Agent & Graph 설계</sub>
     </td>
     <td align="center">
       <a href="https://github.com/Mode1221">
@@ -194,7 +238,7 @@ GOOGLE_CSE_ID=your_api_key_here
         <sub><b>정성훈</b></sub>
       </a>
       <br />
-      <sub>역할: AI 에이전트 설계 및 데이터 수집</sub>
+      <sub>RAG 시스템 구축</sub>
     </td>
     <td align="center">
       <a href="https://github.com/suleunky">
@@ -203,7 +247,7 @@ GOOGLE_CSE_ID=your_api_key_here
         <sub><b>조은기</b></sub>
       </a>
       <br />
-      <sub>역할: AI 에이전트 설계</sub>
+      <sub>Tool 개발</sub>
     </td>
   </tr>
 </table>
