@@ -31,105 +31,105 @@ def _ensure_agent(agent_state: Any) -> Any:
 
 # 스트리밍 메시지 처리 함수
 def handle_message_stream(
-    user_message: str, history: ChatHistory, agent_state: Optional[Any]
-) -> Generator[Tuple[ChatHistory, Any, str], None, None]:
+    user_message: str, history: List[dict], agent_state: Optional[Any]
+) -> Generator[Tuple[List[dict], Any, str], None, None]:
     
     global interrupt_state
     
     if not user_message or not user_message.strip():
         raise gr.Error("메시지를 입력해주세요.")
 
+    # history가 None이면 빈 리스트로 초기화
     history = history or []
     agent = _ensure_agent(agent_state)
 
-    # interrupt 상태에서 사용자 응답 처리
+    # 1. 사용자 메시지 추가 (딕셔너리 형태)
+    history.append({"role": "user", "content": user_message})
+    
+    # 2. AI 응답을 위한 빈 말풍선 미리 추가
+    history.append({"role": "assistant", "content": ""})
+
+    # ------------------------------------------------------------------
+    # CASE A: Interrupt 상태에서 복귀 (사용자 응답 처리)
+    # ------------------------------------------------------------------
     if interrupt_state["active"]:
         interrupt_state["active"] = False
-        
-        # 사용자 메시지 추가
-        history = history + [(user_message, "")]
-        
         print(f"[DEBUG] Resuming with: {user_message.strip()}")
 
-        # 재개
-        accumulated_response = ""
         try:
+            accumulated_response = ""
+            
+            # stream_resume 호출
             for chunk in agent.stream_resume(user_message.strip(), interrupt_state["thread_id"]):
+                
                 if chunk["type"] == "ai_message":
                     accumulated_response = chunk["content"]
-                    updated_history = history[:-1] + [(user_message, accumulated_response)]
-                    yield updated_history, agent, ""
+                    # 마지막 메시지(AI) 내용을 실시간 업데이트
+                    history[-1]["content"] = accumulated_response
+                    yield history, agent, ""
                 
                 elif chunk["type"] == "tool_call":
                     tool_name = chunk["tool_name"]
                     tool_info = f"\n\n🔧 [{tool_name} 실행 중...]"
-                    updated_history = history[:-1] + [(user_message, accumulated_response + tool_info)]
-                    yield updated_history, agent, ""
+                    # 도구 실행 정보를 기존 응답 뒤에 붙여서 표시
+                    history[-1]["content"] = accumulated_response + tool_info
+                    yield history, agent, ""
             
-            # 최종 응답
-            final_history = history[:-1] + [(user_message, accumulated_response)]
-            yield final_history, agent, ""
+            # 최종 응답 확정
+            history[-1]["content"] = accumulated_response
+            yield history, agent, ""
             return
             
         except Exception as exc:
             error_msg = f"❌ 재개 중 문제가 발생했습니다: {exc}"
-            error_history = history[:-1] + [(user_message, error_msg)]
-            yield error_history, agent, ""
+            history[-1]["content"] = error_msg
+            yield history, agent, ""
             return
 
-    # 일반 대화 처리
-    history = history + [(user_message, "")]
-    
+    # ------------------------------------------------------------------
+    # CASE B: 일반 대화 처리
+    # ------------------------------------------------------------------
     try:
         accumulated_response = ""
-        tool_info = ""
         
         for chunk in agent.chat_stream(user_message.strip(), interrupt_state["thread_id"]):
             
-            # interrupt 발생 체크
+            # 1. Interrupt 발생 시 (검색 한도 초과 등)
             if chunk["type"] == "interrupt":
                 interrupt_state["active"] = True
                 
-                # interrupt 메시지 표시
                 interrupt_msg = chunk["content"].get("message", "검색 한도에 도달했습니다.")
-                accumulated_response = f"⚠️ {interrupt_msg}\n\n('응' 또는 '아니'로 답변해주세요)"
-                updated_history = history[:-1] + [(user_message, accumulated_response)]
-                yield updated_history, agent, ""
+                warning_msg = f"⚠️ {interrupt_msg}\n\n('응' 또는 '아니'로 답변해주세요)"
+                
+                history[-1]["content"] = warning_msg
+                yield history, agent, ""
                 return
             
-            # AI 메시지 스트리밍
+            # 2. 일반 AI 메시지 스트리밍
             elif chunk["type"] == "ai_message":
                 accumulated_response = chunk["content"]
-                updated_history = history[:-1] + [(user_message, accumulated_response)]
-                yield updated_history, agent, ""
+                history[-1]["content"] = accumulated_response
+                yield history, agent, ""
             
-            # 도구 호출 표시
+            # 3. 도구 호출 표시
             elif chunk["type"] == "tool_call":
                 tool_name = chunk["tool_name"]
                 tool_info = f"\n\n🔧 [{tool_name} 실행 중...]"
-                updated_history = history[:-1] + [(user_message, accumulated_response + tool_info)]
-                yield updated_history, agent, ""
+                history[-1]["content"] = accumulated_response + tool_info
+                yield history, agent, ""
             
-            # 시스템 메시지
+            # 4. 시스템 메시지 (무시)
             elif chunk["type"] == "system_message":
-                system_msg = chunk["content"]
                 pass
-            
-            # 검색 횟수 표시 
-            # elif chunk["type"] == "search_count":
-            #     count_info = f"\n\n_📊 검색 횟수: {chunk['count']}회_"
-            #     updated_history = history[:-1] + [(user_message, accumulated_response + count_info)]
-            #     yield updated_history, agent, ""
         
-        # 최종 응답
-        final_history = history[:-1] + [(user_message, accumulated_response)]
-        yield final_history, agent, ""
+        # 최종 응답 확정
+        history[-1]["content"] = accumulated_response
+        yield history, agent, ""
         
     except Exception as exc:
         error_msg = f"❌ 응답 생성 중 문제가 발생했습니다: {exc}"
-        error_history = history[:-1] + [(user_message, error_msg)]
-        yield error_history, agent, ""
-
+        history[-1]["content"] = error_msg
+        yield history, agent, ""
 
 # 대화 초기화 함수
 def reset_conversation() -> Tuple[ChatHistory, None, str]:
@@ -178,4 +178,4 @@ def build_interface() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    build_interface().queue().launch()
+    build_interface().queue().launch(share=True)
